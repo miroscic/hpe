@@ -53,7 +53,7 @@
 #include <cmath>
 #endif
 
-#ifdef KINECT_AZURE
+#ifdef KINECT_AZURE_LIBS
 #pragma message("This computer has the Kinect Azure SDK installed.")
 // include Kinect libraries
 #include <k4a/k4a.h>
@@ -93,6 +93,36 @@ map<int, string> keypoints_map_azure = {
   {24, "ANKR"}, {18, "HIPL"}, {19, "KNEL"}, {20, "ANKL"}, {30, "EYER"},
   {28, "EYEL"}, {31, "EARR"}, {29, "EARL"}};
 
+enum VideoSource {  /** < Video source type to handle different platforms and devices */
+    KINECT_AZURE_CAMERA,
+    KINECT_AZURE_DUMMY,
+    RGB_CAMERA,
+    RGB_CAMERA_DUMMY,
+    RASPI_RGB_CAMERA,
+    RASPI_RGB_CAMERA_DUMMY,
+    UNKNOWN
+};
+
+string video_source_to_string(VideoSource source) {
+    switch (source) {
+      case KINECT_AZURE_CAMERA:
+        return "KINECT_AZURE_CAMERA";
+      case KINECT_AZURE_DUMMY:
+        return "KINECT_AZURE_DUMMY";
+      case RGB_CAMERA:
+        return "RGB_CAMERA";
+      case RGB_CAMERA_DUMMY:
+        return "RGB_CAMERA_DUMMY";
+      case RASPI_RGB_CAMERA:
+        return "RASPI_RGB_CAMERA";
+      case RASPI_RGB_CAMERA_DUMMY:
+        return "RASPI_RGB_CAMERA_DUMMY";
+      case UNKNOWN:
+        return "UNKNOWN";
+      default:
+        return "INVALID";
+    }
+}
 
 // Plugin class. This shall be the only part that needs to be modified,
 // implementing the actual functionality
@@ -126,6 +156,133 @@ public:
   // Destructor
   ~HpePlugin() {}
 
+  string get_dummy_file_extension(string dummy_file_path = "") {
+    // Return the file extension for dummy files
+    if (dummy_file_path.empty()) {
+      return "";
+    }
+    
+    // Find the last dot in the file path
+    size_t dot_pos = dummy_file_path.find_last_of('.');
+    if (dot_pos != string::npos) {
+      return dummy_file_path.substr(dot_pos);
+    }
+    
+    // If no extension found, return empty string
+    return "";
+  }
+
+  bool is_raspberry_pi() {
+    // Check if the platform is a Raspberry Pi
+    ifstream cpuinfo("/proc/cpuinfo");
+    string line;
+    while (std::getline(cpuinfo, line)) {
+      if (line.find("Raspberry Pi") != string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool is_rgb_camera_connected() {
+    // Check if an RGB camera is connected with opencv
+    vector<int> camera_indices = {0, 1, 2, 3, 4, 5}; // Common camera indices
+    for (int index : camera_indices) {
+      VideoCapture cap(index);
+      if (cap.isOpened()) {
+        cap.release();
+        return true; // Camera is connected
+      }
+    }
+    return false; // No camera found
+  }
+
+  bool is_kinect_azure_connected() {
+    // Check if a Kinect Azure camera is connected
+    #ifdef KINECT_AZURE_LIBS
+      uint32_t device_count = k4a_device_get_installed_count();
+      if( device_count > 0){
+        return true;
+      }
+      else{
+        return false;
+      }
+    #endif
+
+    return false; 
+  }
+
+  bool is_raspi_rgb_camera_connected() {
+    // Check if a Raspberry Pi RGB camera is connected
+    #ifdef __linux
+      _raspi_rgb_camera.options->video_width = rgb_width_read;   // 1280;
+      _raspi_rgb_camera.options->video_height = rgb_height_read; // 720;
+      _raspi_rgb_camera.options->framerate = 25;
+      _raspi_rgb_camera.options->verbose = false;
+      if(_raspi_rgb_camera.startVideo())
+        return true; // Camera is connected
+      else
+        return false; // Camera is not connected  
+    #endif
+
+    return false; 
+  }
+
+  bool is_kinect_azure_lib_installed() {
+    // Check if the Kinect Azure library is installed
+    #ifdef KINECT_AZURE_LIBS
+      return true;
+    #endif
+
+    return false;
+  }
+
+  return_type set_video_source (bool dummy = false) {
+
+    if (dummy) {
+      string dummy_ext = get_dummy_file_extension(_params["dummy_file_path"]);
+
+      if (dummy_ext == ".mp4") {
+          _video_source = is_raspberry_pi() ? RASPI_RGB_CAMERA_DUMMY : RGB_CAMERA_DUMMY;
+      }
+      else if (dummy_ext == ".mkv") {
+          _video_source = is_kinect_azure_lib_installed() ? KINECT_AZURE_DUMMY : UNKNOWN;
+          if (_video_source == UNKNOWN) {
+            cout << "\033[1;31mThe dummy file extension is .mkv but the azure kinect libraries are not installed\033[0m" << endl;
+            return return_type::error;
+          }
+      }
+      else {
+          _video_source = UNKNOWN;
+            cout << "\033[1;31mThe dummy file extension is not valid\033[0m" << endl;
+          return return_type::error;
+      }
+    }
+    else {
+        if (is_raspberry_pi()) {
+            _video_source = is_raspi_rgb_camera_connected() ? RASPI_RGB_CAMERA : UNKNOWN;
+            if (_video_source == UNKNOWN) {
+                cout << "\033[1;31mThe platform is a Raspberry Pi but no camera is connected\033[0m" << endl;
+              return return_type::error;
+            }
+        }
+        else if (is_kinect_azure_lib_installed() && is_kinect_azure_connected()) {
+            _video_source = KINECT_AZURE_CAMERA;
+        }
+        else if (is_rgb_camera_connected()) {
+            _video_source = RGB_CAMERA;
+        }
+        else {
+            _video_source = UNKNOWN;
+            cout << "\033[1;31mNo camera connected\033[0m" << endl;
+            return return_type::error;
+        }
+    }
+
+    return return_type::success;
+
+  }
+
   /**
    * @brief Acquire a frame from a camera device. Camera ID is defined in the
    * parameters list.
@@ -137,9 +294,29 @@ public:
    * @author Nicola
    * @return result status ad defined in return_type
    */
-  return_type acquire_frame(bool dummy = false) {
+  return_type acquire_frame() {
 
     cout << "Acquiring frame..." << endl;
+
+    if (KINECT_AZURE_CAMERA){
+
+    }
+    else if (RGB_CAMERA){
+
+    }
+    else if (RASPI_RGB_CAMERA){
+
+    }
+    else if (KINECT_AZURE_DUMMY) {
+      
+    }
+    else if (RGB_CAMERA_DUMMY || RASPI_RGB_CAMERA_DUMMY){
+
+    }
+    else {
+      cout << "Unknown video source type. Cannot acquire frame." << endl;
+      return return_type::error;
+    } 
     
     return return_type::success;
   }
@@ -279,7 +456,7 @@ public:
     out["agent_id"] = _agent_id;
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
 
-    if (acquire_frame(_params["dummy"]) == return_type::error) {
+    if (acquire_frame() == return_type::error) {
       return return_type::error;
     }
 
@@ -316,7 +493,11 @@ public:
   void set_params(void const *params) override {
     Source::set_params(params);
     _params.merge_patch(*(json *)params);
-  }
+
+    set_video_source(_params["dummy"]);
+
+    cout << "Video source: " << video_source_to_string(_video_source) << endl;
+  } 
 
   // Implement this method if you want to provide additional information
   map<string, string> info() override { 
@@ -346,6 +527,12 @@ protected:
   std::vector<Eigen::Matrix2f> _cov2D_vec; /**< the 2D covariance matrix vector */
   std::vector<Eigen::Matrix3f> _cov3D_vec; /**< the 3D covariance matrix vector */
   json _params;   /**< the parameters of the plugin */
+
+  VideoSource _video_source; /**< the video source type */
+
+  #ifdef __linux
+  lccv::PiCamera _raspi_rgb_camera; // for Raspi
+  #endif
 
 };
 
