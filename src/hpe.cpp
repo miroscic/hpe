@@ -277,9 +277,9 @@ public:
     out.clear();
 
     out["agent_id"] = _agent_id;
-    out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_start_time.time_since_epoch()).count();
+    out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
 
-    if (acquire_frame(_dummy) == return_type::error) {
+    if (acquire_frame(_params["dummy"]) == return_type::error) {
       return return_type::error;
     }
 
@@ -294,8 +294,7 @@ public:
       return return_type::error;
     }
     
-    if (skeleton_from_rgb_compute(
-            _params["debug"]["skeleton_from_rgb_compute"]) ==
+    if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) ==
         return_type::error) {
       return return_type::error;
     }
@@ -315,7 +314,8 @@ public:
   }
 
   void set_params(void const *params) override {
- 
+    Source::set_params(params);
+    _params.merge_patch(*(json *)params);
   }
 
   // Implement this method if you want to provide additional information
@@ -327,6 +327,10 @@ public:
   };
 
 protected:
+
+  string _agent_id; /**< the agent ID */
+  string _model_file; /**< the model file path */
+  chrono::steady_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
 
   Mat _rgbd;          /**< the last RGBD frame */
   Mat _rgb;           /**< the last RGB frame */
