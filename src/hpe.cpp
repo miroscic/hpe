@@ -59,6 +59,7 @@
 #include <k4a/k4a.h>
 #include <k4a/k4a.hpp>
 #include <k4abt.hpp>
+#include <k4arecord/playback.h>
 #endif
 
 // Load the namespaces
@@ -132,7 +133,7 @@ class HpePlugin : public Source<json> {
     ____  _        _   _                                 _
    / ___|| |_ __ _| |_(_) ___   _ __ ___   ___ _ __ ___ | |__   ___ _ __ ___
    \___ \| __/ _` | __| |/ __| | '_ ` _ \ / _ \ '_ ` _ \| '_ \ / _ \ '__/ __|
-    ___) | || (_| | |_| | (__  | | | | | |  __/ | | | | | |_) |  __/ |  \__ \
+    ___) | (_) | |_| | | (__  | | | | | |  __/ | | | | | |_) |  __/ |  \__ \
    |____/ \__\__,_|\__|_|\___| |_| |_| |_|\___|_| |_| |_|_.__/ \___|_|  |___/
 
   */
@@ -283,6 +284,599 @@ public:
 
   }
 
+  #ifdef KINECT_AZURE_LIBS
+  k4a::image transform_color_to_depth_coordinates(k4a_transformation_t transformation_handle, 
+                                                  k4a::image color_image, 
+                                                  k4a::image depth_image) {
+    if (!depth_image.is_valid()) {
+      cout << "\033[1;33mWarning: No depth image available, skipping color-to-depth transformation\033[0m" << endl;
+      return color_image;
+    }
+    
+    cout << "Depth image available - checking color image format..." << endl;
+    
+    // Check if the color image is compressed (JPEG) or raw (BGRA32)
+    k4a_image_format_t color_format = color_image.get_format();
+    cout << "Original color image format: " << color_format << endl;
+    
+    k4a::image color_image_for_transform;
+    
+    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      cout << "Color image is already in BGRA32 format" << endl;
+      color_image_for_transform = color_image;
+    } else {
+      cout << "Color image is compressed (format: " << color_format << "), decompressing first..." << endl;
+      
+      // Decompress the image to get raw BGRA32 data
+      size_t buffer_size = color_image.get_size();
+      uint8_t *compressed_buffer = color_image.get_buffer();
+      
+      // Create a temporary Mat from the compressed buffer
+      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image for transformation!\033[0m" << endl;
+        return color_image; // Use original as fallback
+      }
+      
+      cout << "Decoded image dimensions: " << decoded_image.cols << "x" << decoded_image.rows << endl;
+      
+      // Convert BGR to BGRA
+      cv::Mat bgra_image;
+      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
+      
+      // Create a new k4a::image with the decompressed BGRA data
+      color_image_for_transform = k4a::image::create(
+        K4A_IMAGE_FORMAT_COLOR_BGRA32,
+        bgra_image.cols,
+        bgra_image.rows,
+        bgra_image.cols * 4 * sizeof(uint8_t)
+      );
+      
+      if (color_image_for_transform.is_valid()) {
+        // Copy the BGRA data to the k4a::image
+        uint8_t *k4a_buffer = color_image_for_transform.get_buffer();
+        memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
+        cout << "Created BGRA32 k4a::image for transformation" << endl;
+      } else {
+        cout << "\033[1;33mWarning: Failed to create BGRA32 k4a::image, using original\033[0m" << endl;
+        return color_image;
+      }
+    }
+    
+    // Now proceed with the transformation using the BGRA32 image
+    if (color_image_for_transform.is_valid() && color_image_for_transform.get_format() == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      cout << "Proceeding with color to depth transformation..." << endl;
+      
+      // Create a new k4a::image for the transformed color image
+      k4a::image transformed_color_image = k4a::image::create(
+        K4A_IMAGE_FORMAT_COLOR_BGRA32,
+        depth_image.get_width_pixels(),
+        depth_image.get_height_pixels(),
+        depth_image.get_width_pixels() * 4 * sizeof(uint8_t)
+      );
+      
+      if (transformed_color_image.is_valid()) {
+        // Transform color image to depth camera coordinates
+        k4a_result_t transform_result = k4a_transformation_color_image_to_depth_camera(
+          transformation_handle,
+          depth_image.handle(),
+          color_image_for_transform.handle(),
+          transformed_color_image.handle()
+        );
+        
+        if (transform_result == K4A_RESULT_SUCCEEDED) {
+          cout << "Color to depth transformation successful" << endl;
+          cout << "Transformed image dimensions: " << transformed_color_image.get_width_pixels() 
+               << "x" << transformed_color_image.get_height_pixels() << endl;
+          return transformed_color_image;
+        } else {
+          cout << "\033[1;33mWarning: Color to depth transformation failed, using original color image\033[0m" << endl;
+        }
+      } else {
+        cout << "\033[1;33mWarning: Failed to create transformed color image buffer\033[0m" << endl;
+      }
+    } else {
+      cout << "\033[1;33mWarning: Cannot transform - color image is not in BGRA32 format\033[0m" << endl;
+    }
+    
+    return color_image; // Return original if transformation failed
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type k4a_color_image_to_cv_mat(k4a::image k4a_image, cv::Mat& output_mat) {
+    
+    if (!k4a_image.is_valid()) {
+      cout << "\033[1;31mInvalid k4a::image provided\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    int rows = k4a_image.get_height_pixels();
+    int cols = k4a_image.get_width_pixels();
+    
+    // Check buffer size
+    size_t buffer_size = k4a_image.get_size();
+    uint8_t *buffer = k4a_image.get_buffer();
+    
+    // Calculate expected buffer size
+    size_t expected_size = rows * cols * 4; // 4 bytes per pixel for BGRA
+    
+    // Get the stride (bytes per row) from the image
+    size_t stride = k4a_image.get_stride_bytes();
+    
+    // Check image format
+    k4a_image_format_t format = k4a_image.get_format();
+    
+    if (stride == 0 || buffer_size < expected_size) {
+      // Handle compressed image
+      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image!\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Convert to BGR if necessary (OpenCV imdecode usually returns BGR)
+      if (decoded_image.channels() == 3) {
+        output_mat = decoded_image.clone();
+      } else {
+        cv::cvtColor(decoded_image, output_mat, cv::COLOR_BGRA2BGR);
+      }
+    } else {
+      // Handle raw BGRA data
+      try {
+        cv::Mat temp_mat = cv::Mat(rows, cols, CV_8UC4, (void *)buffer, stride);
+        cv::cvtColor(temp_mat, output_mat, cv::COLOR_BGRA2BGR);
+      } catch (const cv::Exception& e) {
+        cout << "\033[1;31mColor conversion failed: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      } catch (const std::exception& e) {
+        cout << "\033[1;31mException creating Mat: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      }
+    }
+    
+    // Final check if Mat was created successfully
+    if (output_mat.empty()) {
+      cout << "\033[1;31mFailed to create cv::Mat from k4a::image!\033[0m" << endl;
+      return return_type::error;
+    }  
+
+    return return_type::success;
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type k4a_depth_image_to_cv_mat(k4a::image k4a_depth_image, cv::Mat& output_mat) {
+    
+    if (!k4a_depth_image.is_valid()) {
+      cout << "\033[1;31mInvalid k4a depth image provided\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    int rows = k4a_depth_image.get_height_pixels();
+    int cols = k4a_depth_image.get_width_pixels();
+    
+    // Check buffer size
+    size_t buffer_size = k4a_depth_image.get_size();
+    uint8_t *buffer = k4a_depth_image.get_buffer();
+    
+    // Calculate expected buffer size for raw depth image (2 bytes per pixel)
+    size_t expected_raw_size = rows * cols * 2; // 2 bytes per pixel for 16-bit depth
+    
+    // Get the stride (bytes per row) from the image
+    size_t stride = k4a_depth_image.get_stride_bytes();
+    
+    // Check image format
+    k4a_image_format_t format = k4a_depth_image.get_format();
+    
+    if (format != K4A_IMAGE_FORMAT_DEPTH16) {
+      cout << "\033[1;31mUnsupported depth image format: " << format << "\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    // Check if the depth image is compressed (from MKV file)
+    if (stride == 0 || buffer_size < expected_raw_size) {
+      cout << "Depth image appears to be compressed (buffer size: " << buffer_size 
+           << ", expected: " << expected_raw_size << ")" << endl;
+      
+      // Try to decompress using OpenCV (some MKV files use standard compression)
+      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_ANYDEPTH | cv::IMREAD_ANYCOLOR);
+      
+      if (!decoded_image.empty()) {
+        cout << "Successfully decoded compressed depth image using OpenCV" << endl;
+        
+        // Convert to 16-bit if necessary
+        if (decoded_image.type() == CV_16U) {
+          output_mat = decoded_image.clone();
+        } else {
+          decoded_image.convertTo(output_mat, CV_16U);
+        }
+      } else {
+        cout << "\033[1;33mWarning: Failed to decode compressed depth data with OpenCV\033[0m" << endl;
+        cout << "\033[1;33mAssuming raw depth data despite size mismatch\033[0m" << endl;
+        
+        // Fallback: try to interpret as raw data anyway
+        if (stride == 0) {
+          stride = cols * 2; // Default stride for 16-bit depth
+        }
+        
+        try {
+          cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
+          output_mat = temp_mat.clone();
+        } catch (const cv::Exception& e) {
+          cout << "\033[1;31mFailed to create Mat from raw depth data: " << e.what() << "\033[0m" << endl;
+          return return_type::error;
+        }
+      }
+    } else {
+      // Handle raw depth data (16-bit unsigned integers)
+      cout << "Processing raw depth data" << endl;
+      
+      try {
+        if (stride == 0) {
+          stride = cols * 2; // Default stride for 16-bit depth
+        }
+        
+        // Create Mat from raw depth data
+        cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
+        
+        // Clone the data to ensure it's owned by output_mat
+        output_mat = temp_mat.clone();
+        
+      } catch (const cv::Exception& e) {
+        cout << "\033[1;31mDepth image conversion failed: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      } catch (const std::exception& e) {
+        cout << "\033[1;31mException creating depth Mat: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      }
+    }
+    
+    // Final check if Mat was created successfully
+    if (output_mat.empty()) {
+      cout << "\033[1;31mFailed to create cv::Mat from k4a depth image!\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    cout << "Depth image converted successfully: " << output_mat.cols << "x" << output_mat.rows 
+         << " (type: " << output_mat.type() << ")" << endl;
+
+    return return_type::success;
+  }
+  #endif
+
+  return_type setup_video_capture(bool debug = false){
+
+    size_t found = _resolution_rgb.find("x");
+    int rgb_width_read = 1280;
+    int rgb_height_read = 720;
+
+    if (found != string::npos) {
+      cout <<"found? " << found << endl;
+      rgb_width_read = stoi(_resolution_rgb.substr(0, found));
+      rgb_height_read = stoi(_resolution_rgb.substr(found + 1, _resolution_rgb.length()));
+    }
+
+    if (_video_source == KINECT_AZURE_CAMERA) {
+      #ifdef KINECT_AZURE_LIBS
+      _device_config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
+      _device_config.color_format = K4A_IMAGE_FORMAT_COLOR_BGRA32;  
+      _device_config.color_resolution = K4A_COLOR_RESOLUTION_720P;
+      _device_config.depth_mode = K4A_DEPTH_MODE_NFOV_UNBINNED;
+      
+      if (_params.contains("azure_device")) {
+          _azure_device = _params["azure_device"];
+          cout << "Camera id: " << _azure_device << endl;
+        } else {
+          cout << "Camera id (default): " << _azure_device << endl;
+      }
+
+      _kinect_device = k4a::device::open(_azure_device);
+      _kinect_device.start_cameras(&_device_config);
+
+      _kinect_calibration = _kinect_device.get_calibration(_device_config.depth_mode, _device_config.color_resolution);
+      
+      // Get the depth camera intrinsics
+      auto depth_camera_calibration = _kinect_calibration.depth_camera_calibration;
+
+      _cx = depth_camera_calibration.intrinsics.parameters.param.cx;
+      _cy = depth_camera_calibration.intrinsics.parameters.param.cy;
+      _fx = depth_camera_calibration.intrinsics.parameters.param.fx;
+      _fy = depth_camera_calibration.intrinsics.parameters.param.fy;
+
+      // Create transformation handle for color-to-depth coordinate transformation
+      _kinect_color_transformation_handle = k4a_transformation_create(&_kinect_calibration);
+      if (_kinect_color_transformation_handle == nullptr) {
+        cout << "\033[1;31mFailed to create transformation handle\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      _point_cloud_transformation = k4a_transformation_create(&_kinect_calibration);
+
+      _kinect_tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
+      if (_params.contains("CUDA")) {
+        cout << "Body tracker CUDA processor enabled: " << _params["CUDA"] << endl;
+        if (_params["CUDA"] == true)
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
+      }
+      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, K4ABT_TRACKER_CONFIG_DEFAULT);
+
+      // acquire a frame just to get the resolution
+      _kinect_device.get_capture(&_k4a_rgbd_capture, std::chrono::milliseconds(K4A_WAIT_INFINITE));
+
+      _k4a_color_image = _k4a_rgbd_capture.get_color_image();
+
+      // Transform the color image into depth image coordinates before converting into cv::Mat
+      _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
+      _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+
+      //TODO: è da fare nel distruttore
+      // Clean up the transformation handle
+      //k4a_transformation_destroy(_kinect_color_transformation_handle);
+
+      // Convert k4a::image to cv::Mat --> color image
+
+      if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Save the RGB image for debugging
+      if (debug) {
+        string filename = "azure_rgb_transformed_to_depth_coordinates.jpg";
+        
+        // Create debug directory path relative to the source file location
+        std::filesystem::path debug_dir;
+        
+        // Get the directory of the current source file
+        std::filesystem::path source_file_path = std::filesystem::path(__FILE__);
+        std::filesystem::path source_dir = source_file_path.parent_path();
+        std::filesystem::path hpe_path;
+        
+        // Look for hpe directory starting from source file directory and going up
+        std::filesystem::path search_path = source_dir;
+        bool found_hpe = false;
+        
+        for (int i = 0; i < 5; ++i) { // Search up to 5 levels up
+          std::filesystem::path potential_hpe = search_path / "hpe";
+          if (std::filesystem::exists(potential_hpe) && std::filesystem::is_directory(potential_hpe)) {
+            hpe_path = potential_hpe;
+            found_hpe = true;
+            break;
+          }
+          // If we're already in a directory named "hpe", use it
+          if (search_path.filename() == "hpe") {
+            hpe_path = search_path;
+            found_hpe = true;
+            break;
+          }
+          if (search_path.has_parent_path()) {
+            search_path = search_path.parent_path();
+          } else {
+            break;
+          }
+        }
+        
+        if (found_hpe) {
+          debug_dir = hpe_path / "Debug";
+        } else {
+          // Fallback: use source directory + Debug
+          debug_dir = source_dir / "Debug";
+        }
+        
+        // Create debug directory if it doesn't exist
+        try {
+          if (!std::filesystem::exists(debug_dir)) {
+            std::filesystem::create_directories(debug_dir);
+            cout << "Created debug directory: " << debug_dir << endl;
+          }
+        } catch (const std::filesystem::filesystem_error& e) {
+          cout << "\033[1;33mWarning: Failed to create debug directory: " << e.what() << "\033[0m" << endl;
+          debug_dir = source_dir; // Use source directory as fallback
+        }
+        
+        string output_filename = (debug_dir / filename).string();
+        
+        try {
+          bool saved = cv::imwrite(output_filename, _rgb);
+          if (saved) {
+            cout << "\033[1;32mTransformed RGB image saved as: " << output_filename << "\033[0m" << endl;
+          } else {
+            cout << "\033[1;33mWarning: Failed to save transformed RGB image\033[0m" << endl;
+          }
+        } catch (const cv::Exception& e) {
+          cout << "\033[1;33mException saving transformed RGB image: " << e.what() << "\033[0m" << endl;
+        }
+      }
+
+      #endif
+    }
+    else if (_video_source == RGB_CAMERA){
+
+    }
+    else if (_video_source == RASPI_RGB_CAMERA){
+
+    }
+    else if (_video_source == KINECT_AZURE_DUMMY) {
+      #ifdef KINECT_AZURE_LIBS
+      _kinect_mkv_playback_handle = nullptr;
+
+      // A C++ Wrapper for the k4a_playback_t does not exist, so we use the C API directly
+      if (k4a_playback_open(_params["dummy_file_path"].get<string>().c_str(), &_kinect_mkv_playback_handle) != K4A_RESULT_SUCCEEDED) {
+        cout << "\033[1;31mFailed to open dummy file for playback\033[0m" << endl;
+        return return_type::error;
+      }
+
+      if (k4a_playback_get_calibration(_kinect_mkv_playback_handle, &_kinect_calibration) != K4A_RESULT_SUCCEEDED) {
+        cout << "\033[1;31mFailed to get calibration from dummy file\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Get the depth camera intrinsics
+      auto depth_camera_calibration = _kinect_calibration.depth_camera_calibration;
+
+      _cx = depth_camera_calibration.intrinsics.parameters.param.cx;
+      _cy = depth_camera_calibration.intrinsics.parameters.param.cy;
+      _fx = depth_camera_calibration.intrinsics.parameters.param.fx;
+      _fy = depth_camera_calibration.intrinsics.parameters.param.fy;
+
+      // Create transformation handle for color-to-depth coordinate transformation
+      _mkv_color_transformation_handle = k4a_transformation_create(&_kinect_calibration);
+      if (_mkv_color_transformation_handle == nullptr) {
+        cout << "\033[1;31mFailed to create transformation handle\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // We can use again the C++ API to create the _kinect_tracker
+      _kinect_tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
+      if (_params.contains("CUDA")) {
+        cout << "Body tracker CUDA processor enabled: " << _params["CUDA"] << endl;
+        if (_params["CUDA"] == true)
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
+      }
+      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, K4ABT_TRACKER_CONFIG_DEFAULT);
+
+      
+      if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
+        cout << "\033[1;31mFailed to get next capture from dummy file\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Wrap the C handle in a C++ object
+      _k4a_rgbd_capture = k4a::capture(_kinect_mkv_capture_handle);
+      
+      // Check if the capture is valid
+      if (!_k4a_rgbd_capture) {
+        cout << "\033[1;31mInvalid capture from dummy file\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      _k4a_color_image = _k4a_rgbd_capture.get_color_image();
+      
+      // Transform the color image into depth image coordinates before converting into cv::Mat
+      _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
+      _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+
+      //TODO: è da fare nel distruttore
+      // Clean up the transformation handle
+      //k4a_transformation_destroy(_mkv_color_transformation_handle);
+
+      // Convert k4a::image to cv::Mat --> color image
+      if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      // Save the RGB image for debugging
+      if (debug) {
+        string filename = "mkv_rgb_transformed_to_depth_coordinates.jpg";
+        
+        // Create debug directory path relative to the source file location
+        std::filesystem::path debug_dir;
+        
+        // Get the directory of the current source file
+        std::filesystem::path source_file_path = std::filesystem::path(__FILE__);
+        std::filesystem::path source_dir = source_file_path.parent_path();
+        std::filesystem::path hpe_path;
+        
+        // Look for hpe directory starting from source file directory and going up
+        std::filesystem::path search_path = source_dir;
+        bool found_hpe = false;
+        
+        for (int i = 0; i < 5; ++i) { // Search up to 5 levels up
+          std::filesystem::path potential_hpe = search_path / "hpe";
+          if (std::filesystem::exists(potential_hpe) && std::filesystem::is_directory(potential_hpe)) {
+            hpe_path = potential_hpe;
+            found_hpe = true;
+            break;
+          }
+          // If we're already in a directory named "hpe", use it
+          if (search_path.filename() == "hpe") {
+            hpe_path = search_path;
+            found_hpe = true;
+            break;
+          }
+          if (search_path.has_parent_path()) {
+            search_path = search_path.parent_path();
+          } else {
+            break;
+          }
+        }
+        
+        if (found_hpe) {
+          debug_dir = hpe_path / "Debug";
+        } else {
+          // Fallback: use source directory + Debug
+          debug_dir = source_dir / "Debug";
+        }
+        
+        // Create debug directory if it doesn't exist
+        try {
+          if (!std::filesystem::exists(debug_dir)) {
+            std::filesystem::create_directories(debug_dir);
+            cout << "Created debug directory: " << debug_dir << endl;
+          }
+        } catch (const std::filesystem::filesystem_error& e) {
+          cout << "\033[1;33mWarning: Failed to create debug directory: " << e.what() << "\033[0m" << endl;
+          debug_dir = source_dir; // Use source directory as fallback
+        }
+        
+        string output_filename = (debug_dir / filename).string();
+        
+        try {
+          bool saved = cv::imwrite(output_filename, _rgb);
+          if (saved) {
+            cout << "\033[1;32mTransformed RGB image saved as: " << output_filename << "\033[0m" << endl;
+          } else {
+            cout << "\033[1;33mWarning: Failed to save transformed RGB image\033[0m" << endl;
+          }
+        } catch (const cv::Exception& e) {
+          cout << "\033[1;33mException saving transformed RGB image: " << e.what() << "\033[0m" << endl;
+        }
+      }
+      #endif
+    }
+    else if (_video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY){
+
+    }
+    else {
+      cout << "Unknown video source type. Cannot acquire frame." << endl;
+      return return_type::error;
+    }
+
+    _frame_time = chrono::steady_clock::now();
+    cv::Size resolution = _rgb.size();
+    cout << "Frame resolution: " << resolution.width << "x" << resolution.height << endl;
+
+    // If KINECT_AZURE don't change the resolution because the rgb image 
+    //is in the coordinates of the depth image and MUST stay that way
+    if (_video_source != KINECT_AZURE_DUMMY || _video_source != KINECT_AZURE_CAMERA){
+      if(found != string::npos){
+        resolution = cv::Size(rgb_width_read, rgb_height_read);
+
+        _output_transform = OutputTransform(_rgb.size(), resolution);
+        resolution = _output_transform.computeResolution();
+        cv::resize(_rgb, _rgb, cv::Size(resolution.width, resolution.height));
+      }
+    }
+
+    _rgb_height = resolution.height;
+    _rgb_width = resolution.width;
+
+    cout << "RGB Frame resolution: " << _rgb_width << "x" << _rgb_height << endl;
+
+    return return_type::success;
+  }
+
   /**
    * @brief Acquire a frame from a camera device. Camera ID is defined in the
    * parameters list.
@@ -294,23 +888,78 @@ public:
    * @author Nicola
    * @return result status ad defined in return_type
    */
-  return_type acquire_frame() {
+  return_type acquire_frame( bool debug = false) {
 
-    cout << "Acquiring frame..." << endl;
+      cout << "Acquiring frame..." << endl;
 
-    if (KINECT_AZURE_CAMERA){
+    if (_video_source == KINECT_AZURE_CAMERA){
+      #ifdef KINECT_AZURE_LIBS
+
+      _kinect_device.get_capture(&_k4a_rgbd_capture, std::chrono::milliseconds(K4A_WAIT_INFINITE));
+
+      _k4a_color_image = _k4a_rgbd_capture.get_color_image();
+
+      // Transform the color image into depth image coordinates before converting into cv::Mat
+      _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
+      _k4a_color_image = transform_color_to_depth_coordinates(_kinect_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+
+      // Convert k4a::image to cv::Mat --> color image
+      if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Convert k4a::image to cv::Mat --> depth image
+      if (k4a_depth_image_to_cv_mat(_k4a_depth_image, _rgbd) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+    
+      #endif
+    }
+    else if (_video_source == RGB_CAMERA){
 
     }
-    else if (RGB_CAMERA){
+    else if (_video_source == RASPI_RGB_CAMERA){
 
     }
-    else if (RASPI_RGB_CAMERA){
+    else if (_video_source == KINECT_AZURE_DUMMY) {
+      #ifdef KINECT_AZURE_LIBS
 
-    }
-    else if (KINECT_AZURE_DUMMY) {
+      if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
+        cout << "\033[1;31mFailed to get next capture from dummy file\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Wrap the C handle in a C++ object
+      _k4a_rgbd_capture = k4a::capture(_kinect_mkv_capture_handle);
       
+      // Check if the capture is valid
+      if (!_k4a_rgbd_capture) {
+        cout << "\033[1;31mInvalid capture from dummy file\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      _k4a_color_image = _k4a_rgbd_capture.get_color_image();
+      
+      // Transform the color image into depth image coordinates before converting into cv::Mat
+      _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
+      _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+
+      // Convert k4a::image to cv::Mat --> color image
+      if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Convert k4a::image to cv::Mat --> depth image
+      if (k4a_depth_image_to_cv_mat(_k4a_depth_image, _rgbd) != return_type::success) {
+        cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
+        return return_type::error;
+      }
+      #endif  
     }
-    else if (RGB_CAMERA_DUMMY || RASPI_RGB_CAMERA_DUMMY){
+    else if (_video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY){
 
     }
     else {
@@ -333,7 +982,14 @@ public:
   return_type skeleton_from_depth_compute(bool debug = false) {
 
     cout << "Computing skeleton from depth..." << endl;
-    
+
+    if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
+      #ifdef KINECT_AZURE_LIBS
+
+      #endif  
+    return return_type::success;
+    }
+  
     return return_type::success;
   }
 
@@ -349,6 +1005,13 @@ public:
   return_type point_cloud_filter(bool debug = false) {
 
     cout << "Filtering point cloud..." << endl;
+
+    if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
+      #ifdef KINECT_AZURE_LIBS
+
+      #endif  
+    return return_type::success;
+    }
     
     return return_type::success;
   }
@@ -441,6 +1104,28 @@ public:
   return_type viewer(bool debug = false) {
 
     cout << "Launching viewer..." << endl;
+
+    // Show _rgb and _rgbd images in two separate windows contempouraneously
+    cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+    cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+
+    cv::imshow("RGB Frame", _rgb);
+
+    int MAX_DEPTH = 6000; // Maximum depth value in mm
+    _rgbd.convertTo(_rgbd, CV_8U, 255.0 / MAX_DEPTH); 
+    Mat rgbd_color;
+    applyColorMap(_rgbd, rgbd_color, COLORMAP_HSV);
+
+    cv::imshow("RGBD Frame", rgbd_color);
+
+    // Wait for a key press for 30 milliseconds
+    int key = cv::waitKey(30);
+
+    if (key == 27) { // If 'ESC' key is pressed
+      cout << "Exiting viewer..." << endl;
+      cv::destroyAllWindows();
+      return return_type::error;
+    }
     
     return return_type::success;
   }
@@ -485,6 +1170,10 @@ public:
         return_type::error) {
       return return_type::error;
     }
+
+    if (viewer(_params["debug"]["viewer"]) == return_type::error) {
+      return return_type::error;
+    }
         
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     return return_type::success;
@@ -494,9 +1183,17 @@ public:
     Source::set_params(params);
     _params.merge_patch(*(json *)params);
 
-    set_video_source(_params["dummy"]);
+    if (_params.contains("resolution_rgb")) {
+      _resolution_rgb = _params["resolution_rgb"];
+    }
 
-    cout << "Video source: " << video_source_to_string(_video_source) << endl;
+    set_video_source(_params["dummy"]);
+    cout << "\033[1;32mVideo source: " << video_source_to_string(_video_source) << "\033[0m" << endl;
+
+    if(setup_video_capture(_params["debug"]["setup_video_capture"]) == return_type::error) {
+      cout << "\033[1;31mFailed to setup video capture\033[0m" << endl;
+      return;
+    }
   } 
 
   // Implement this method if you want to provide additional information
@@ -533,6 +1230,35 @@ protected:
   #ifdef __linux
   lccv::PiCamera _raspi_rgb_camera; // for Raspi
   #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  int _azure_device = 0; /**< the azure device ID */
+  k4a_device_configuration_t _device_config; /**< the Kinect Azure device configuration */
+  k4a::device _kinect_device; /**< the Kinect Azure device */
+  k4a::calibration _kinect_calibration; /**< the Kinect Azure calibration object */
+  k4abt::tracker _kinect_tracker; /**< the Kinect Azure tracker */
+  k4abt_tracker_configuration_t _kinect_tracker_config; /**< the Kinect Azure tracker configuration */
+  k4a::capture _k4a_rgbd_capture; /**< the Kinect Azure RGBD capture */
+  k4a_capture_t _kinect_mkv_capture_handle;
+  k4a::image _k4a_depth_image; /**< the Kinect Azure depth image */
+  k4a::image _k4a_color_image; /**< the Kinect Azure color image */
+  k4a_transformation_t _point_cloud_transformation; /**< the Kinect Azure point cloud transformation */
+  k4a_transformation_t _mkv_color_transformation_handle; /**< the Kinect Azure MKV color transformation handle */
+  k4a_transformation_t _kinect_color_transformation_handle; /**< the Kinect Azure color transformation handle */
+  k4a_calibration_intrinsic_parameters_t _k4a_rgb_intrinsics; /**< the Kinect Azure RGB camera intrinsics */
+  k4a_playback_t _kinect_mkv_playback_handle; /**< the Kinect Azure MKV playback handle */
+  #endif
+
+  float _cx;
+  float _cy;
+  float _fx;
+  float _fy;
+
+  string _resolution_rgb = ""; /**< the resolution of the RGB frame in the format "widthxheight" */
+  int _rgb_height; /**< the height of the RGB frame */
+  int _rgb_width; /**< the width of the RGB frame */
+
+  OutputTransform _output_transform;
 
 };
 

@@ -12,7 +12,7 @@
 # NOTICE: MADS Version 1.3.1
 
 cmake_minimum_required(VERSION 3.20)
-project(hpe VERSION 1.3.1 LANGUAGES CXX)
+project(hpe VERSION 1.3.1 LANGUAGES C CXX)
 if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
@@ -38,13 +38,6 @@ if (UNIX)
 endif()
 option(SKIP_KINECT_AZURE "Do not use Kinect Azure cameras" OFF)
 
-
-if(UNIX AND NOT APPLE)
-  target_compile_definitions(hpe PRIVATE __linux)
-  target_compile_definitions(hpe_main PRIVATE __linux)
-  set(LINUX TRUE)
-endif()
-
 # DEPENDENCIES #################################################################
 if(WIN32)
   # On Windows, we rely on env variables to find install paths
@@ -67,6 +60,7 @@ if(WIN32)
 else()
   find_path(OPENVINO_INCLUDE_DIR NAMES openvino.hpp 
     PATHS /opt/intel/openvino_2024.4.0/runtime/include
+    PATHS /opt/intel/openvino_2025.2.0/runtime/include
     PATH_SUFFIXES openvino
   )
   cmake_path(GET OPENVINO_INCLUDE_DIR PARENT_PATH OPENVINO_INCLUDE_DIR)
@@ -226,6 +220,11 @@ else()
     add_plugin(hpe LIBS ${OpenCV_LIBS} ${PCL_LIBRARIES} common openvino::runtime Eigen3::Eigen)
   else()
     add_plugin(hpe LIBS ${OpenCV_LIBS} ${PCL_LIBRARIES} common openvino::runtime Eigen3::Eigen lccv_static ${LIBCAMERA_LINK_LIBRARIES})
+    if(UNIX AND NOT APPLE)
+      target_compile_definitions(hpe PRIVATE __linux)
+      target_compile_definitions(hpe_main PRIVATE __linux)
+      set(LINUX TRUE)
+    endif()
   endif()
 endif()
 

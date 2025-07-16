@@ -6,6 +6,7 @@
     "fps": 25,
     "dummy": true,
     "debug": {
+        "setup_video_capture": true,
         "skeleton_from_depth_compute": true,
         "skeleton_from_rgb_compute": true,
         "hessian_compute": true,
