@@ -1105,26 +1105,29 @@ public:
 
     cout << "Launching viewer..." << endl;
 
-    // Show _rgb and _rgbd images in two separate windows contempouraneously
-    cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
-    cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+    if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
 
-    cv::imshow("RGB Frame", _rgb);
+      // Show _rgb and _rgbd images in two separate windows contempouraneously
+      cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+      cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
 
-    int MAX_DEPTH = 6000; // Maximum depth value in mm
-    _rgbd.convertTo(_rgbd, CV_8U, 255.0 / MAX_DEPTH); 
-    Mat rgbd_color;
-    applyColorMap(_rgbd, rgbd_color, COLORMAP_HSV);
+      cv::imshow("RGB Frame", _rgb);
 
-    cv::imshow("RGBD Frame", rgbd_color);
+      int MAX_DEPTH = 6000; // Maximum depth value in mm
+      _rgbd.convertTo(_rgbd, CV_8U, 255.0 / MAX_DEPTH); 
+      Mat rgbd_color;
+      applyColorMap(_rgbd, rgbd_color, COLORMAP_HSV);
 
-    // Wait for a key press for 30 milliseconds
-    int key = cv::waitKey(30);
+      cv::imshow("RGBD Frame", rgbd_color);
 
-    if (key == 27) { // If 'ESC' key is pressed
-      cout << "Exiting viewer..." << endl;
-      cv::destroyAllWindows();
-      return return_type::error;
+      // Wait for a key press for 30 milliseconds
+      int key = cv::waitKey(30);
+
+      if (key == 27) { // If 'ESC' key is pressed
+        cout << "Exiting viewer..." << endl;
+        cv::destroyAllWindows();
+        return return_type::error;
+      }
     }
     
     return return_type::success;
