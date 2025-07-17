@@ -37,3 +37,4 @@ build/*
 usr/*
 *.jpg
 
+/Debug
