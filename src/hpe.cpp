@@ -138,7 +138,87 @@ class HpePlugin : public Source<json> {
 
   */
 
+  static cv::Mat renderHumanPose(HumanPoseResult &_result,
+                                 OutputTransform &outputTransform) {
+    if (!_result.metaData) {
+      throw invalid_argument("ERROR: Renderer: metadata is null");
+    }
 
+    auto output_img = _result.metaData->asRef<ImageMetaData>().img;
+
+    if (output_img.empty()) {
+      throw invalid_argument(
+          "ERROR: Renderer: image provided in metadata is empty");
+    }
+    outputTransform.resize(output_img);
+    static const cv::Scalar colors[HPEOpenPose::keypointsNumber] = {
+        cv::Scalar(255, 0, 0),   cv::Scalar(255, 85, 0),
+        cv::Scalar(255, 170, 0), cv::Scalar(255, 255, 0),
+        cv::Scalar(170, 255, 0), cv::Scalar(85, 255, 0),
+        cv::Scalar(0, 255, 0),   cv::Scalar(0, 255, 85),
+        cv::Scalar(0, 255, 170), cv::Scalar(0, 255, 255),
+        cv::Scalar(0, 170, 255), cv::Scalar(0, 85, 255),
+        cv::Scalar(0, 0, 255),   cv::Scalar(85, 0, 255),
+        cv::Scalar(170, 0, 255), cv::Scalar(255, 0, 255),
+        cv::Scalar(255, 0, 170), cv::Scalar(255, 0, 85)};
+    static const pair<int, int> keypointsOP[] = {
+        {1, 2}, {1, 5},  {2, 3},   {3, 4},  {5, 6},   {6, 7},
+        {1, 8}, {8, 9},  {9, 10},  {1, 11}, {11, 12}, {12, 13},
+        {1, 0}, {0, 14}, {14, 16}, {0, 15}, {15, 17}};
+    static const pair<int, int> keypointsAE[] = {
+        {15, 13}, {13, 11}, {16, 14}, {14, 12}, {11, 12}, {5, 11}, {6, 12},
+        {5, 6},   {5, 7},   {6, 8},   {7, 9},   {8, 10},  {1, 2},  {0, 1},
+        {0, 2},   {1, 3},   {2, 4},   {3, 5},   {4, 6}};
+    const int stick_width = 4;
+    const cv::Point2f absent_keypoint(-1.0f, -1.0f);
+    for (auto &pose : _result.poses) {
+      for (size_t keypoint_idx = 0; keypoint_idx < pose.keypoints.size();
+           keypoint_idx++) {
+        if (pose.keypoints[keypoint_idx] != absent_keypoint) {
+          outputTransform.scaleCoord(pose.keypoints[keypoint_idx]);
+          cv::circle(output_img, pose.keypoints[keypoint_idx], 4,
+                     colors[keypoint_idx], -1);
+        }
+      }
+    }
+    vector<pair<int, int>> limb_keypoints_ids;
+    if (!_result.poses.empty()) {
+      if (_result.poses[0].keypoints.size() == HPEOpenPose::keypointsNumber) {
+        limb_keypoints_ids.insert(limb_keypoints_ids.begin(),
+                                  begin(keypointsOP), end(keypointsOP));
+      } else {
+        limb_keypoints_ids.insert(limb_keypoints_ids.begin(),
+                                  begin(keypointsAE), end(keypointsAE));
+      }
+    }
+    cv::Mat pane = output_img.clone();
+    for (auto pose : _result.poses) {
+      for (const auto &limb_keypoints_id : limb_keypoints_ids) {
+        pair<cv::Point2f, cv::Point2f> limb_keypoints(
+            pose.keypoints[limb_keypoints_id.first],
+            pose.keypoints[limb_keypoints_id.second]);
+        if (limb_keypoints.first == absent_keypoint ||
+            limb_keypoints.second == absent_keypoint) {
+          continue;
+        }
+
+        data_t mean_x = (limb_keypoints.first.x + limb_keypoints.second.x) / 2;
+        data_t mean_y = (limb_keypoints.first.y + limb_keypoints.second.y) / 2;
+        cv::Point difference = limb_keypoints.first - limb_keypoints.second;
+        data_t length =
+            sqrt(difference.x * difference.x + difference.y * difference.y);
+        int angle =
+            static_cast<int>(atan2(difference.y, difference.x) * 180 / CV_PI);
+        vector<cv::Point> polygon;
+        cv::ellipse2Poly(cv::Point2d(mean_x, mean_y),
+                         cv::Size2d(length / 2, stick_width), angle, 0, 360, 1,
+                         polygon);
+        cv::fillConvexPoly(pane, polygon, colors[limb_keypoints_id.second]);
+      }
+    }
+    cv::addWeighted(output_img, 0.4, pane, 0.6, 0, output_img);
+    return output_img;
+  }
 
   /*
     __  __      _   _               _
@@ -155,7 +235,32 @@ public:
   HpePlugin() : _agent_id(PLUGIN_NAME) {}
 
   // Destructor
-  ~HpePlugin() {}
+  ~HpePlugin() {
+
+    if(_video_source = KINECT_AZURE_CAMERA){
+      #ifdef KINECT_AZURE_LIBS
+
+      #endif
+    }
+    else if (_video_source == RGB_CAMERA){
+
+    }
+    else if (_video_source == RASPI_RGB_CAMERA){
+      #ifdef __linux
+        
+      #endif
+    }
+    else if(_video_source = KINECT_AZURE_DUMMY){
+      #ifdef KINECT_AZURE_LIBS
+
+      #endif
+    }
+    else if(_video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY){
+
+    }
+
+    delete _pipeline;
+  }
 
   string get_dummy_file_extension(string dummy_file_path = "") {
     // Return the file extension for dummy files
@@ -284,6 +389,24 @@ public:
 
   }
 
+  void setup_OpenPoseModel() {
+    // setup inference model
+    data_t aspect_ratio = _rgb_width / static_cast<data_t>(_rgb_height);
+    _model.reset(new HPEOpenPose(_model_file, aspect_ratio, _tsize,
+                                 static_cast<data_t>(_threshold), _layout));
+  }
+
+  void setup_Pipeline() {
+    // setup pipeline
+    _pipeline =
+        new AsyncPipeline(std::move(_model),
+                          ConfigFactory::getUserConfig(
+                              _inference_device, _nireq, _nstreams, _nthreads),
+                          _core);
+    _frame_num = _pipeline->submitData(
+        ImageInputData(_rgb), make_shared<ImageMetaData>(_rgb, _frame_time));
+  }
+
   #ifdef KINECT_AZURE_LIBS
   k4a::image transform_color_to_depth_coordinates(k4a_transformation_t transformation_handle, 
                                                   k4a::image color_image, 
@@ -370,8 +493,6 @@ public:
         
         if (transform_result == K4A_RESULT_SUCCEEDED) {
           cout << "Color to depth transformation successful" << endl;
-          cout << "Transformed image dimensions: " << transformed_color_image.get_width_pixels() 
-               << "x" << transformed_color_image.get_height_pixels() << endl;
           return transformed_color_image;
         } else {
           cout << "\033[1;33mWarning: Color to depth transformation failed, using original color image\033[0m" << endl;
@@ -554,6 +675,267 @@ public:
   }
   #endif
 
+  #ifdef KINECT_AZURE_LIBS
+  void mask_depth_with_body_index(const k4a::image &depth_image,
+                                  const k4a::image &body_index_map,
+                                  k4a::image &masked_depth_image) {
+    // Get image dimensions
+    int width = depth_image.get_width_pixels();
+    int height = depth_image.get_height_pixels();
+
+    // Get pointers to the image data
+    const uint16_t *depth_data =
+        reinterpret_cast<const uint16_t *>(depth_image.get_buffer());
+    const uint8_t *body_index_data =
+        reinterpret_cast<const uint8_t *>(body_index_map.get_buffer());
+    uint16_t *masked_depth_data =
+        reinterpret_cast<uint16_t *>(masked_depth_image.get_buffer());
+
+    // Iterate over each pixel
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int idx = y * width + x;
+
+        // Check if the pixel belongs to a body
+        if (body_index_data[idx] != K4ABT_BODY_INDEX_MAP_BACKGROUND) {
+          // Copy the depth value
+          masked_depth_data[idx] = depth_data[idx];
+        } else {
+          // Set to zero or any background value (e.g., 0 for no depth)
+          masked_depth_data[idx] = 0;
+        }
+      }
+    }
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type create_point_cloud(k4a_transformation_t transformation_handle,
+                                   const k4a_image_t depth_image,
+                                   const k4a_image_t color_image) {
+    // Check if the color image is compressed (JPEG) or raw (BGRA32)
+    k4a_image_format_t color_format = k4a_image_get_format(color_image);
+    cout << "Color image format in create_point_cloud: " << color_format << endl;
+    
+    k4a_image_t color_image_for_transform = NULL;
+    
+    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      cout << "Color image is already in BGRA32 format" << endl;
+      // Use the original image directly
+      color_image_for_transform = const_cast<k4a_image_t>(color_image);
+      k4a_image_reference(color_image_for_transform);
+    } else {
+      cout << "Color image is compressed (format: " << color_format << "), decompressing for point cloud..." << endl;
+      
+      // Decompress the image to get raw BGRA32 data
+      size_t buffer_size = k4a_image_get_size(color_image);
+      uint8_t *compressed_buffer = k4a_image_get_buffer(color_image);
+      
+      // Create a temporary Mat from the compressed buffer
+      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image for point cloud!\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      cout << "Decoded image dimensions: " << decoded_image.cols << "x" << decoded_image.rows << endl;
+      
+      // Convert BGR to BGRA
+      cv::Mat bgra_image;
+      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
+      
+      // Create a new k4a_image_t with the decompressed BGRA data
+      if (K4A_RESULT_SUCCEEDED != k4a_image_create(
+          K4A_IMAGE_FORMAT_COLOR_BGRA32,
+          bgra_image.cols,
+          bgra_image.rows,
+          bgra_image.cols * 4 * sizeof(uint8_t),
+          &color_image_for_transform)) {
+        cout << "\033[1;31mFailed to create BGRA32 k4a_image_t for point cloud\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      // Copy the BGRA data to the k4a_image_t
+      uint8_t *k4a_buffer = k4a_image_get_buffer(color_image_for_transform);
+      memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
+      cout << "Created BGRA32 k4a_image_t for point cloud creation" << endl;
+    }
+    
+    int depth_image_width_pixels = k4a_image_get_width_pixels(depth_image);
+    int depth_image_height_pixels = k4a_image_get_height_pixels(depth_image);
+    k4a_image_t transformed_color_image = NULL;
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_image_create(K4A_IMAGE_FORMAT_COLOR_BGRA32,
+                          depth_image_width_pixels, depth_image_height_pixels,
+                          depth_image_width_pixels * 4 * (int)sizeof(uint8_t),
+                          &transformed_color_image)) {
+      printf("Failed to create transformed color image\n");
+      return return_type::error;
+    }
+
+    k4a_image_t point_cloud_image = NULL;
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_image_create(K4A_IMAGE_FORMAT_CUSTOM, depth_image_width_pixels,
+                          depth_image_height_pixels,
+                          depth_image_width_pixels * 3 * (int)sizeof(int16_t),
+                          &point_cloud_image)) {
+      printf("Failed to create point cloud image\n");
+      return return_type::error;
+    }
+
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_transformation_color_image_to_depth_camera(
+            transformation_handle, depth_image, color_image_for_transform,
+            transformed_color_image)) {
+      printf("Failed to compute transformed color image\n");
+      // Clean up the color image if it was created
+      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+        k4a_image_release(color_image_for_transform);
+      }
+      return return_type::error;
+    }
+
+    if (K4A_RESULT_SUCCEEDED != k4a_transformation_depth_image_to_point_cloud(
+                                    transformation_handle, depth_image,
+                                    K4A_CALIBRATION_TYPE_DEPTH,
+                                    point_cloud_image)) {
+      printf("Failed to compute point cloud\n");
+      // Clean up the color image if it was created
+      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+        k4a_image_release(color_image_for_transform);
+      }
+      return return_type::error;
+    }
+
+    std::vector<color_point_t> points;
+
+    int width = k4a_image_get_width_pixels(point_cloud_image);
+    int height = k4a_image_get_height_pixels(transformed_color_image);
+
+    int16_t *point_cloud_image_data =
+        (int16_t *)(void *)k4a_image_get_buffer(point_cloud_image);
+    uint8_t *color_image_data = k4a_image_get_buffer(transformed_color_image);
+
+    for (int i = 0; i < width * height; i++) {
+      color_point_t point;
+      point.xyz[0] = point_cloud_image_data[3 * i + 0];
+      point.xyz[1] = point_cloud_image_data[3 * i + 1];
+      point.xyz[2] = point_cloud_image_data[3 * i + 2];
+      if (point.xyz[2] == 0) {
+        continue;
+      }
+
+      point.rgb[0] = color_image_data[4 * i + 0];
+      point.rgb[1] = color_image_data[4 * i + 1];
+      point.rgb[2] = color_image_data[4 * i + 2];
+      uint8_t alpha = color_image_data[4 * i + 3];
+
+      if (point.rgb[0] == 0 && point.rgb[1] == 0 && point.rgb[2] == 0 &&
+          alpha == 0) {
+        continue;
+      }
+
+      points.push_back(point);
+    }
+
+    // convert the points to a point cloud of Mat type
+    _point_cloud = cv::Mat(points.size(), 6, CV_32F);
+    for (size_t i = 0; i < points.size(); i++) {
+      _point_cloud.at<float>(i, 0) = points[i].xyz[0];
+      _point_cloud.at<float>(i, 1) = points[i].xyz[1];
+      _point_cloud.at<float>(i, 2) = points[i].xyz[2];
+      _point_cloud.at<float>(i, 3) = points[i].rgb[2];
+      _point_cloud.at<float>(i, 4) = points[i].rgb[1];
+      _point_cloud.at<float>(i, 5) = points[i].rgb[0];
+    }
+
+    // Save the point cloud to a ply file
+    // write_ply_from_points_vector(points,
+    // "../plugin_skeletonizer_3D/test_points.ply");
+    // write_ply_from_cv_mat(_point_cloud,
+    // "../plugin_skeletonizer_3D/test_cv_mat.ply");
+
+    // Clean up the color image if it was created for decompression
+    if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      k4a_image_release(color_image_for_transform);
+    }
+
+    return return_type::success;
+  }
+  #endif
+
+  void write_ply_from_cv_mat(cv::Mat point_cloud, const char *file_name) {
+    #define PLY_START_HEADER "ply"
+    #define PLY_END_HEADER "end_header"
+    #define PLY_ASCII "format ascii 1.0"
+    #define PLY_ELEMENT_VERTEX "element vertex"
+
+    // save to the ply file
+    std::ofstream ofs(file_name); // text mode first
+    ofs << PLY_START_HEADER << std::endl;
+    ofs << PLY_ASCII << std::endl;
+    ofs << PLY_ELEMENT_VERTEX << " " << point_cloud.rows << std::endl;
+    ofs << "property float x" << std::endl;
+    ofs << "property float y" << std::endl;
+    ofs << "property float z" << std::endl;
+    ofs << "property uchar red" << std::endl;
+    ofs << "property uchar green" << std::endl;
+    ofs << "property uchar blue" << std::endl;
+    ofs << PLY_END_HEADER << std::endl;
+    ofs.close();
+
+    std::stringstream ss;
+    for (int i = 0; i < point_cloud.rows; ++i) {
+      ss << point_cloud.at<float>(i, 0) << " " << point_cloud.at<float>(i, 1)
+          << " " << point_cloud.at<float>(i, 2);
+      ss << " " << point_cloud.at<float>(i, 3) << " "
+          << point_cloud.at<float>(i, 4) << " " << point_cloud.at<float>(i, 5);
+      ss << std::endl;
+    }
+    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
+    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
+  }
+
+  static void write_ply_from_points_vector(std::vector<color_point_t> points,
+                                             const char *file_name) {
+
+    #define PLY_START_HEADER "ply"
+    #define PLY_END_HEADER "end_header"
+    #define PLY_ASCII "format ascii 1.0"
+    #define PLY_ELEMENT_VERTEX "element vertex"
+
+    // save to the ply file
+    std::ofstream ofs(file_name); // text mode first
+    ofs << PLY_START_HEADER << std::endl;
+    ofs << PLY_ASCII << std::endl;
+    ofs << PLY_ELEMENT_VERTEX << " " << points.size() << std::endl;
+    ofs << "property float x" << std::endl;
+    ofs << "property float y" << std::endl;
+    ofs << "property float z" << std::endl;
+    ofs << "property uchar red" << std::endl;
+    ofs << "property uchar green" << std::endl;
+    ofs << "property uchar blue" << std::endl;
+    ofs << PLY_END_HEADER << std::endl;
+    ofs.close();
+
+    std::stringstream ss;
+    for (size_t i = 0; i < points.size(); ++i) {
+      // image data is BGR
+      ss << (float)points[i].xyz[0] << " " << (float)points[i].xyz[1] << " "
+          << (float)points[i].xyz[2];
+      ss << " " << (float)points[i].rgb[2] << " " << (float)points[i].rgb[1]
+          << " " << (float)points[i].rgb[0];
+      ss << std::endl;
+    }
+    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
+    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
+  }
+
+
   return_type setup_video_capture(bool debug = false){
 
     size_t found = _resolution_rgb.find("x");
@@ -617,7 +999,7 @@ public:
 
       // Transform the color image into depth image coordinates before converting into cv::Mat
       _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
-      _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+      _k4a_color_image = transform_color_to_depth_coordinates(_kinect_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
 
       //TODO: è da fare nel distruttore
       // Clean up the transformation handle
@@ -735,6 +1117,8 @@ public:
         cout << "\033[1;31mFailed to create transformation handle\033[0m" << endl;
         return return_type::error;
       }
+
+      _point_cloud_transformation = k4a_transformation_create(&_kinect_calibration);
 
       // We can use again the C++ API to create the _kinect_tracker
       _kinect_tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
@@ -855,11 +1239,11 @@ public:
 
     _frame_time = chrono::steady_clock::now();
     cv::Size resolution = _rgb.size();
-    cout << "Frame resolution: " << resolution.width << "x" << resolution.height << endl;
+    cout << "RGB Frame resolution (pre-resize): " << resolution.width << "x" << resolution.height << endl;
 
     // If KINECT_AZURE don't change the resolution because the rgb image 
     //is in the coordinates of the depth image and MUST stay that way
-    if (_video_source != KINECT_AZURE_DUMMY || _video_source != KINECT_AZURE_CAMERA){
+    if (_video_source != KINECT_AZURE_DUMMY && _video_source != KINECT_AZURE_CAMERA){
       if(found != string::npos){
         resolution = cv::Size(rgb_width_read, rgb_height_read);
 
@@ -872,7 +1256,7 @@ public:
     _rgb_height = resolution.height;
     _rgb_width = resolution.width;
 
-    cout << "RGB Frame resolution: " << _rgb_width << "x" << _rgb_height << endl;
+    cout << "RGB Frame resolution (post-resize): " << _rgb_width << "x" << _rgb_height << endl;
 
     return return_type::success;
   }
@@ -985,8 +1369,74 @@ public:
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
+      if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
+      // It should never hit timeout when K4A_WAIT_INFINITE is set.
+      cout << "Error! Add capture to tracker process queue timeout!" << endl;
+      return return_type::error;
+      } 
 
+      _body_frame = _kinect_tracker.pop_result();
+      
+      if (_body_frame != nullptr) {
+        if (_body_frame.get_num_bodies() == 0) {
+            cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
+          return return_type::success;
+        }
+        
+        // Only take one body (always the first one)
+        k4abt_body_t body = _body_frame.get_body(0);
+
+        _body_index_map = _body_frame.get_body_index_map();
+        
+
+        for (const auto &[index, keypoint_name] : keypoints_map_azure) {
+          k4a_float3_t position = body.skeleton.joints[index].position;
+
+          vector<float> keypoint_data;
+          keypoint_data.push_back(static_cast<float>(position.v[0]));
+          keypoint_data.push_back(static_cast<float>(position.v[1]));
+          keypoint_data.push_back(static_cast<float>(position.v[2]));
+
+          _skeleton3D[keypoint_name] = keypoint_data;
+          
+        }
+
+        // Map the 3D keypoints to the 2D keypoints
+        for (int i = 0; i < 18; ++i) {
+          std::string keypoint_name_tmp = keypoints_map_openpose[i];
+          for (const auto &[index, keypoint_azure_name] : keypoints_map_azure) {
+            if (keypoint_azure_name == keypoint_name_tmp) {
+              k4a_float3_t position = body.skeleton.joints[index].position;
+              _keypoints_list_azure[i] =
+                  cv::Point3f(position.v[0], position.v[1], position.v[2]);
+              break;
+            }
+          }
+        }
+
+        if (debug) {
+          cout << "\nSkeleton 3D:" << endl;
+          for (const auto &[keypoint_name, keypoint_data] : _skeleton3D) {
+            cout << keypoint_name << ": (";
+            for (size_t i = 0; i < keypoint_data.size(); ++i) {
+              cout << static_cast<int>(keypoint_data[i]);
+              if (i < keypoint_data.size() - 1) {
+                cout << ", ";
+              }
+            }
+            cout << ")" << endl;
+          }
+        }
+
+      } else {
+        //  It should never hit timeout when K4A_WAIT_INFINITE is set.
+        cout << "Error! Pop body frame result time out!" << endl;
+        return return_type::error;
+      }
+
+      return return_type::success;  
       #endif  
+
     return return_type::success;
     }
   
@@ -1007,10 +1457,48 @@ public:
     cout << "Filtering point cloud..." << endl;
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
+      
       #ifdef KINECT_AZURE_LIBS
+      
+      if(_body_index_map != nullptr){
+        // mask the depth image with the body index map
+        k4a::image masked_depth_image = k4a::image::create(
+            K4A_IMAGE_FORMAT_DEPTH16, _k4a_depth_image.get_width_pixels(),
+            _k4a_depth_image.get_height_pixels(), _k4a_depth_image.get_stride_bytes());
 
+        mask_depth_with_body_index(_k4a_depth_image, _body_index_map,
+                                  masked_depth_image);
+
+        k4a_image_t masked_depth_handle = masked_depth_image.handle();
+        k4a_image_reference(masked_depth_handle);
+
+        // from k4a::image to cv::Mat --> depth image
+        if (masked_depth_image != NULL) {
+          // get raw buffer
+          uint8_t *buffer = masked_depth_image.get_buffer();
+          cout << "Depth image buffer:" << buffer << endl;
+
+          // convert the raw buffer to cv::Mat
+          int rows = masked_depth_image.get_height_pixels();
+          int cols = masked_depth_image.get_width_pixels();
+          _rgbd_filtered = cv::Mat(rows, cols, CV_16U, (void *)buffer, cv::Mat::AUTO_STEP);
+        }
+
+        // convert the depth image to a point cloud
+        // Take the color image without transforming it to depth coordinates
+        k4a::image k4a_color_image_not_transformed = _k4a_rgbd_capture.get_color_image();
+        k4a_image_t color_handle = k4a_color_image_not_transformed.handle();
+        k4a_image_reference(color_handle);
+
+        // create the point cloud and save it in _point_cloud variable
+        create_point_cloud(_point_cloud_transformation, masked_depth_handle, color_handle);
+      } else{
+        cout << "\033[1;34mBody index map is null. Cannot filter point cloud.\033[0m" << endl;
+        return return_type::success;
+      }
       #endif  
-    return return_type::success;
+
+      return return_type::success;
     }
     
     return return_type::success;
@@ -1048,8 +1536,35 @@ public:
   return_type skeleton_from_rgb_compute(bool debug = false) {
 
     cout << "Computing skeleton from RGB..." << endl;
+    if (_video_source != UNKNOWN){
+      if (_pipeline->isReadyToProcess()) {
+        if (_rgb.empty()) {
+          return return_type::error;
+        }
+
+        _frame_num = _pipeline->submitData(ImageInputData(_rgb), make_shared<ImageMetaData>(_rgb, _frame_time));
+      } else {
+        return return_type::warning;
+      }
+
+      // Waiting for free input slot or output data available. Function will
+      // return immediately if any of them are available.
+      _pipeline->waitForData();
+      if (!(_result = _pipeline->getResult())) {
+        return return_type::warning;
+      }
+
+      if (debug) {
+        renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
+      }
+      _frames_processed++;
     
     return return_type::success;
+    }
+    else{
+      cout << "\033[1;31mUnknown video source type. Cannot compute skeleton from RGB.\033[0m" << endl;
+      return return_type::error;
+    }
   }
 
   /**
@@ -1065,7 +1580,192 @@ public:
 
     cout << "Computing hessians..." << endl;
     
-    return return_type::success;
+    if (_video_source != UNKNOWN){
+      size_t n_pixel = 10; // of how many pixels I move
+
+      _keypoints_list_openpose.clear();
+      _keypoints_cov_openpose.resize(HPEOpenPose::keypointsNumber);
+      _keypoints_cov_openpose.clear();
+      _poses_openpose.clear();
+      _poses_openpose = _result->asRef<HumanPoseResult>().poses;
+
+
+      // cout << "poses.size()-----> " << _poses_openpose.size() << endl;
+      if (_poses_openpose.size() > 0) { // at least one person
+        
+        for (auto &keypoint :
+            _poses_openpose[0].keypoints) { // if I have more than one person, I take the
+          // first with id[0]
+
+          if (keypoint.x > _rgb_width) {
+            keypoint.x = _rgb_width - 1;
+          }
+          if (keypoint.y > _rgb_height) {
+            keypoint.y = _rgb_height - 1;
+          }
+          _keypoints_list_openpose.push_back(cv::Point2i(
+              keypoint.x,
+              keypoint.y)); // I always have 18 keypoints, if there is no (-1,-1)
+        }
+
+        for (int ii = 0; ii < HPEOpenPose::keypointsNumber; ii++) {
+
+          if (_keypoints_list_openpose[ii].x > 0 && _keypoints_list_openpose[ii].y > 0) {
+
+            if (_keypoints_list_openpose[ii].y < n_pixel) {
+              _keypoints_list_openpose[ii].y = n_pixel;
+            } else if (_keypoints_list_openpose[ii].y >= _rgb_height - n_pixel) {
+              _keypoints_list_openpose[ii].y = _rgb_height - n_pixel - 1;
+            }
+
+            if (_keypoints_list_openpose[ii].x < n_pixel) {
+              _keypoints_list_openpose[ii].x = n_pixel;
+            } else if (_keypoints_list_openpose[ii].x >= _rgb_width - n_pixel) {
+              _keypoints_list_openpose[ii].x = _rgb_width - n_pixel - 1;
+            }
+
+            cv::Mat _heat_map = _result->asRef<HumanPoseResult>().heatMaps[ii];
+            cv::resize(_heat_map, _heat_map, cv::Size(_rgb_width, _rgb_height));
+
+            data_t H_ri_ci = _heat_map.at<data_t>(_keypoints_list_openpose[ii].y,
+                                                  _keypoints_list_openpose[ii].x);
+            
+            data_t H_ri_ciPLUSn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y, _keypoints_list_openpose[ii].x + n_pixel);
+              
+            data_t H_ri_ciMINn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y, _keypoints_list_openpose[ii].x - n_pixel);
+            
+            data_t H_riPLUSn_ci = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y + n_pixel, _keypoints_list_openpose[ii].x);
+            
+            data_t H_riMINn_ci = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y - n_pixel, _keypoints_list_openpose[ii].x);
+            
+
+            data_t H11 = (1.0 / (n_pixel * n_pixel)) *
+                        (H_ri_ciPLUSn - 2 * H_ri_ci + H_ri_ciMINn);
+            
+            data_t H22 = (1.0 / (n_pixel * n_pixel)) *
+                        (H_riPLUSn_ci - 2 * H_ri_ci + H_riMINn_ci);
+            
+
+            data_t H_riMINn_ciMINn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y - n_pixel, _keypoints_list_openpose[ii].x - n_pixel);
+            
+            data_t H_riMINn_ciPLUSn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y - n_pixel, _keypoints_list_openpose[ii].x + n_pixel);
+            
+            data_t H_riPLUSn_ciMINn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y + n_pixel, _keypoints_list_openpose[ii].x - n_pixel);
+            
+            data_t H_riPLUSn_ciPLUSn = _heat_map.at<data_t>(
+                _keypoints_list_openpose[ii].y + n_pixel, _keypoints_list_openpose[ii].x + n_pixel);
+            
+
+            data_t H12 = (1.0 / (4 * n_pixel * n_pixel)) *
+                        (H_riPLUSn_ciPLUSn - H_riPLUSn_ciMINn -
+                          H_riMINn_ciPLUSn + H_riMINn_ciMINn);
+            
+            data_t H21 = H12;
+
+            Eigen::Matrix2f A;
+            A << H11, H12, H21, H22;
+
+            
+
+            Eigen::Matrix2f C = (-A).inverse();
+          
+            _cov2D_vec.push_back(C);
+            Eigen::EigenSolver<Eigen::Matrix2f> s(C); // the instance s(C)
+                                                      // includes the eigensystem
+
+            complex<data_t> D11_tmp = s.eigenvalues()[0];
+            data_t D11 = D11_tmp.real(); 
+            
+            complex<data_t> D22_tmp = s.eigenvalues()[1];
+            data_t D22 = D22_tmp.real();
+            
+
+            complex<data_t> V11_tmp = s.eigenvectors()(0, 0);
+            data_t V11 = V11_tmp.real();
+            complex<data_t> V21_tmp = s.eigenvectors()(1, 0);
+            data_t V21 = V21_tmp.real();
+
+            data_t perc_prob = 0.68; // standard confidence interval
+            data_t xradius = sqrt(D11 * (-2) * log(1 - perc_prob));
+            data_t yradius = sqrt(D22 * (-2) * log(1 - perc_prob));
+
+            data_t alpha = atan2(V21, V11);
+
+            _keypoints_cov_openpose[ii].x = xradius;
+            _keypoints_cov_openpose[ii].y = yradius;
+            _keypoints_cov_openpose[ii].z = alpha;
+
+            if (debug) {
+              vector<data_t> theta;
+              for (data_t j = 0; j < 2 * M_PI; j += 2 * (M_PI / 40)) {
+                theta.push_back(j);
+              }
+
+              vector<data_t> x_ellips;
+              vector<data_t> y_ellips;
+
+              for (int j = 0; j < theta.size(); j++) {
+                x_ellips.push_back(xradius * cos(theta[j]));
+                y_ellips.push_back(yradius * sin(theta[j]));
+              }
+
+              vector<cv::Point2f> ellipse_points;
+              for (int j = 0; j < x_ellips.size(); j++) {
+                data_t element_1 =
+                    (cos(alpha) * x_ellips[j] + (-sin(alpha)) * y_ellips[j]) +
+                    _keypoints_list_openpose[ii].x;
+                data_t element_2 =
+                    (sin(alpha) * x_ellips[j] + cos(alpha) * y_ellips[j]) +
+                    _keypoints_list_openpose[ii].y;
+                ellipse_points.push_back(cv::Point2f(element_1, element_2));
+              }
+
+              // Draw keypoints
+              cv::circle(_rgb,
+                        cv::Point(_keypoints_list_openpose[ii].x, _keypoints_list_openpose[ii].y),
+                        5, cv::Scalar(0, 255, 0), cv::FILLED);
+
+              // Draw ellipse points
+              for (int i = 0; i < ellipse_points.size(); ++i) {
+
+                if (ellipse_points[i].x < 0) {
+                  ellipse_points[i].x = 1;
+                }
+                if (ellipse_points[i].y < 0) {
+                  ellipse_points[i].y = 1;
+                }
+                if (ellipse_points[i].x > _rgb_width) {
+                  ellipse_points[i].x = _rgb_width - 1;
+                }
+                if (ellipse_points[i].y > _rgb_height) {
+                  ellipse_points[i].y = _rgb_height - 1;
+                }
+
+                cv::circle(_rgb, ellipse_points[i], 2, cv::Scalar(255, 0, 0),
+                          cv::FILLED, 8, 0);
+              }
+            }
+          } else {
+            Eigen::Matrix2f A_NaN;
+            A_NaN << -1, -1, -1, -1;
+            _cov2D_vec.push_back(A_NaN);
+          }
+        }
+      }
+      return return_type::success;
+    } 
+    else {
+      cout << "\033[1;31mUnknown video source type. Cannot compute hessians.\033[0m" << endl;
+      return return_type::error;
+    }
+  
   }
 
   /**
@@ -1084,8 +1784,145 @@ public:
   return_type cov3D_compute(bool debug = false) {
 
     cout << "Computing 3D covariance..." << endl;
-    
-    return return_type::success;
+
+    if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
+      #ifdef KINECT_AZURE_LIBS
+      if (_keypoints_list_openpose.size() > 0) { // at least one person
+        for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
+          Eigen::Matrix2f _cov2D_vec_TMP = _cov2D_vec[i];
+
+          if (!(_keypoints_list_azure[i].x == -1 &&
+                _keypoints_list_azure[i].y == -1 &&
+                _keypoints_list_azure[i].z == -1) &&
+              !(_cov2D_vec_TMP.array() == -1).all()) {
+
+            float Z_tmp = _keypoints_list_azure[i].z;
+            float sigma_z = -0.000000000035541*Z_tmp*Z_tmp*Z_tmp+0.000000493877878*Z_tmp*Z_tmp - 0.001100245600022*Z_tmp+1.989206937961068; // KINECT AZURE model
+            float variance_z = sigma_z * sigma_z;
+
+            Eigen::Matrix<float, 3, 2> J;
+            J << Z_tmp / _fx, 0, 0, Z_tmp / _fy, 0, 0;
+
+            Eigen::Matrix3f covMatrixZ;
+            covMatrixZ << 0, 0, 0, 0, 0, 0, 0, 0, variance_z;
+
+            Eigen::Matrix3f covMatrix3D = J * _cov2D_vec_TMP * J.transpose() + covMatrixZ;
+            _cov3D_vec.push_back(covMatrix3D);
+            _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
+          } else {
+            Eigen::Matrix3f covMatrixZ_NaN;
+            covMatrixZ_NaN.setConstant(-1);
+            _cov3D_vec.push_back(covMatrixZ_NaN);
+            _cov3D[keypoints_map_openpose[i]] = covMatrixZ_NaN; // store the 3D covariance matrix in the map
+          }
+        }
+      }
+
+      if (debug) {
+        // Save the 3D covariance matrices to a JSON file
+        json json_cov3D_vec;
+        
+        // Create debug directory path relative to the source file location
+        std::filesystem::path debug_dir;
+        
+        // Get the directory of the current source file
+        std::filesystem::path source_file_path = std::filesystem::path(__FILE__);
+        std::filesystem::path source_dir = source_file_path.parent_path();
+        std::filesystem::path hpe_path;
+        
+        // Look for hpe directory starting from source file directory and going up
+        std::filesystem::path search_path = source_dir;
+        bool found_hpe = false;
+        
+        for (int i = 0; i < 5; ++i) { // Search up to 5 levels up
+          std::filesystem::path potential_hpe = search_path / "hpe";
+          if (std::filesystem::exists(potential_hpe) && std::filesystem::is_directory(potential_hpe)) {
+            hpe_path = potential_hpe;
+            found_hpe = true;
+            break;
+          }
+          // If we're already in a directory named "hpe", use it
+          if (search_path.filename() == "hpe") {
+            hpe_path = search_path;
+            found_hpe = true;
+            break;
+          }
+          if (search_path.has_parent_path()) {
+            search_path = search_path.parent_path();
+          } else {
+            break;
+          }
+        }
+        
+        if (found_hpe) {
+          debug_dir = hpe_path / "Debug" / "Covariances 3D";
+        } else {
+          // Fallback: use source directory + Debug + Covariances 3D
+          debug_dir = source_dir / "Debug" / "Covariances 3D";
+        }
+        
+        // Create debug directory if it doesn't exist
+        try {
+          if (!std::filesystem::exists(debug_dir)) {
+            std::filesystem::create_directories(debug_dir);
+            cout << "Created covariances debug directory: " << debug_dir << endl;
+          }
+        } catch (const std::filesystem::filesystem_error& e) {
+          cout << "\033[1;33mWarning: Failed to create covariances debug directory: " << e.what() << "\033[0m" << endl;
+          debug_dir = source_dir; // Use source directory as fallback
+        }
+        
+        string cov3D_filename = (debug_dir / "cov3D_data.json").string();
+        
+        std::ifstream input_file(cov3D_filename);
+
+        if (input_file.is_open()) {
+          input_file >> json_cov3D_vec;
+          input_file.close();
+        }
+
+        static int frame_counter = 0;
+
+        json frame_data;
+        frame_data["frame"] = frame_counter;
+        json cov_matrix_list;
+
+        for (size_t i = 0; i < _cov3D_vec.size(); ++i) {
+          json cov_matrix_3x3;
+
+          for (int row = 0; row < 3; ++row) {
+            cov_matrix_3x3.push_back(
+                {_cov3D_vec[i](row, 0), _cov3D_vec[i](row, 1), _cov3D_vec[i](row, 2)});
+          }
+
+          cov_matrix_list.push_back(cov_matrix_3x3);
+        }
+
+        frame_data["cov3D"] = cov_matrix_list;
+
+        json_cov3D_vec.push_back(frame_data);
+
+        std::ofstream output_file(cov3D_filename);
+        output_file << json_cov3D_vec.dump(4);
+        output_file.close();
+
+        frame_counter++;
+      }
+      #endif
+
+      return return_type::success;
+    }
+    else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
+             _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+
+              
+      
+      return return_type::success;
+    } else {
+      cout << "\033[1;31mUnknown video source type. Cannot compute 3D covariance.\033[0m" << endl;
+      return return_type::error;
+    }
+  
   }
 
   /**
@@ -1104,28 +1941,60 @@ public:
   return_type viewer(bool debug = false) {
 
     cout << "Launching viewer..." << endl;
+    if (debug){
 
-    if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
+      if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
 
-      // Show _rgb and _rgbd images in two separate windows contempouraneously
-      cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
-      cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+        // Show _rgb and _rgbd images in two separate windows contempouraneously
+        cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+        cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
 
-      cv::imshow("RGB Frame", _rgb);
+        cv::imshow("RGB Frame", _rgb);
 
-      int MAX_DEPTH = 6000; // Maximum depth value in mm
-      _rgbd.convertTo(_rgbd, CV_8U, 255.0 / MAX_DEPTH); 
-      Mat rgbd_color;
-      applyColorMap(_rgbd, rgbd_color, COLORMAP_HSV);
+        int MAX_DEPTH = 6000; // Maximum depth value in mm
+        if(!_rgbd_filtered.empty()){
+          _rgbd_filtered.convertTo(_rgbd_filtered, CV_8U, 255.0 / MAX_DEPTH); 
+          Mat rgbd_color_filtered;
+          applyColorMap(_rgbd_filtered, rgbd_color_filtered, COLORMAP_HSV);
 
-      cv::imshow("RGBD Frame", rgbd_color);
+          cv::imshow("RGBD Frame", rgbd_color_filtered);
+        }
+        else{
+          _rgbd.convertTo(_rgbd, CV_8U, 255.0 / MAX_DEPTH); 
+          Mat rgbd_color;
+          applyColorMap(_rgbd, rgbd_color, COLORMAP_HSV);
 
-      // Wait for a key press for 30 milliseconds
-      int key = cv::waitKey(30);
+          cv::imshow("RGBD Frame", rgbd_color);
+        }
+        
+        // Wait for a key press for 30 milliseconds
+        int key = cv::waitKey(30);
+        if (key == 27) { // If 'ESC' key is pressed
+          cout << "Exiting viewer..." << endl;
+          cv::destroyAllWindows();
+          return return_type::error;
+        }
 
-      if (key == 27) { // If 'ESC' key is pressed
-        cout << "Exiting viewer..." << endl;
-        cv::destroyAllWindows();
+      }
+      else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA || 
+              _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+
+        // Show _rgb image in a window
+        cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+        cv::imshow("RGB Frame", _rgb);
+
+        // Wait for a key press for 30 milliseconds
+        int key = cv::waitKey(30);
+
+        if (key == 27) { // If 'ESC' key is pressed
+          cout << "Exiting viewer..." << endl;
+          cv::destroyAllWindows();
+          return return_type::error;
+        }
+
+      }
+      else {
+        cout << "Unknown video source type. Cannot launch viewer." << endl;
         return return_type::error;
       }
     }
@@ -1148,21 +2017,25 @@ public:
       return return_type::error;
     }
 
+    
     if (skeleton_from_depth_compute(
             _params["debug"]["skeleton_from_depth_compute"]) ==
         return_type::error) {
       return return_type::error;
     }
+    
 
     if (point_cloud_filter(_params["debug"]["point_cloud_filter"]) ==
         return_type::error) {
       return return_type::error;
     }
     
+    
     if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) ==
         return_type::error) {
       return return_type::error;
     }
+    
 
     if (hessian_compute(_params["debug"]["hessian_compute"]) ==
         return_type::error) {
@@ -1179,6 +2052,71 @@ public:
     }
         
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
+    
+
+    // Prepare output 
+    // the json definition is on the google doc: https://docs.google.com/document/d/1IRs9VA9gGh8CmGIK8cRInYrMCY8cF8FMGC5H8DoonJI
+
+    // Use maps to convert from keypoints lists to  _skeleton3D and _cov3D
+    // _skeleton3D is already in the right format, so we can use it directly
+    // _cov3D_vec is a vector of matrices, so we need to convert it to a MAP in _cov3D
+
+    // Prepare the output json
+    if (_poses_openpose.size() > 0) {
+      out["typ"] = "3D";
+      for (int kp = 0; kp < _keypoints_list_openpose.size(); kp++) {
+        if (_keypoints_list_openpose[kp].x < 0 || _keypoints_list_openpose[kp].y < 0)
+          continue;
+        
+        if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
+          
+          out[keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
+
+          out[keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
+         
+          out[keypoints_map_openpose[kp]]["unc"] = 
+            {
+              _cov3D[keypoints_map_openpose[kp]](0, 0),   // Ux
+              _cov3D[keypoints_map_openpose[kp]](1, 1),   // Uy
+              _cov3D[keypoints_map_openpose[kp]](2, 2),   // Uz
+              _cov3D[keypoints_map_openpose[kp]](0, 1),   // Uxy
+              _cov3D[keypoints_map_openpose[kp]](0, 2),   // Uxz
+              _cov3D[keypoints_map_openpose[kp]](1, 2)    // Uyz
+            }; 
+
+        } 
+        else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
+                   _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+            //used ony RGB inference
+
+            //TODO: CONVERTIRE I PUNTI IN 3D!!!! Usare la matrice di calibrazione (ALE LUCHETTI)
+            
+            out["typ"] = "2D";
+
+            out[keypoints_map_openpose[kp]]["crd"] = {
+              _keypoints_list_openpose[kp].x,
+              _keypoints_list_openpose[kp].y};
+
+            out[keypoints_map_openpose[kp]]["unc"] = {
+              _keypoints_cov_openpose[kp].x,
+              _keypoints_cov_openpose[kp].y,
+              _keypoints_cov_openpose[kp].z
+            };
+        }
+        else {
+          cout << "\033[1;31mUnknown video source type. Cannot prepare output.\033[0m" << endl;
+          return return_type::error;
+        }
+      }
+    }
+
+    // clear the fields for the next frame
+    _skeleton2D.clear();
+    _skeleton3D.clear(); 
+    _cov3D.clear();
+    _cov2D_vec.clear();
+    _cov3D_vec.clear();
+
     return return_type::success;
   }
 
@@ -1193,10 +2131,19 @@ public:
     set_video_source(_params["dummy"]);
     cout << "\033[1;32mVideo source: " << video_source_to_string(_video_source) << "\033[0m" << endl;
 
+    if (_params.contains("model_file")) {
+      _model_file = _params["model_file"];
+    } else {
+      throw invalid_argument("ERROR: Missing model_file parameter");
+    }
+
     if(setup_video_capture(_params["debug"]["setup_video_capture"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup video capture\033[0m" << endl;
       return;
     }
+
+    setup_OpenPoseModel();
+    setup_Pipeline();
   } 
 
   // Implement this method if you want to provide additional information
@@ -1228,6 +2175,8 @@ protected:
   std::vector<Eigen::Matrix3f> _cov3D_vec; /**< the 3D covariance matrix vector */
   json _params;   /**< the parameters of the plugin */
 
+  cv::Point3f _keypoints_list_azure[18]; /**< the 3D keypoints list for Azure */
+
   VideoSource _video_source; /**< the video source type */
 
   #ifdef __linux
@@ -1245,6 +2194,8 @@ protected:
   k4a_capture_t _kinect_mkv_capture_handle;
   k4a::image _k4a_depth_image; /**< the Kinect Azure depth image */
   k4a::image _k4a_color_image; /**< the Kinect Azure color image */
+  k4a::image _body_index_map; /**< the Kinect Azure body index map */
+  k4abt::frame _body_frame; /**< the Kinect Azure body frame */
   k4a_transformation_t _point_cloud_transformation; /**< the Kinect Azure point cloud transformation */
   k4a_transformation_t _mkv_color_transformation_handle; /**< the Kinect Azure MKV color transformation handle */
   k4a_transformation_t _kinect_color_transformation_handle; /**< the Kinect Azure color transformation handle */
@@ -1260,8 +2211,28 @@ protected:
   string _resolution_rgb = ""; /**< the resolution of the RGB frame in the format "widthxheight" */
   int _rgb_height; /**< the height of the RGB frame */
   int _rgb_width; /**< the width of the RGB frame */
+  VideoCapture _cap; /**< the OpenCV video capture object */
 
-  OutputTransform _output_transform;
+  vector<cv::Point2i> _keypoints_list_openpose; /**< the 2D keypoints list for OpenPose */
+  vector<cv::Point3f> _keypoints_cov_openpose; /**< the 2D covariance for OpenPose keypoints */
+  map<int, int> _keypoints_openpose_to_azure; /**< map of the OpenPose keypoints to the Azure keypoints */
+
+  uint32_t _tsize = 0;              /**< target size*/
+  data_t _threshold = 0.1;          /**< probability threshold*/
+  string _layout = "";              /**< inputs layouts (NCHW, NHWC)*/
+  string _inference_device = "CPU"; /**< computation device*/
+  uint32_t _nireq = 0;              /**< number of infer requests*/
+  string _nstreams = "";            /**< number of streams*/
+  uint32_t _nthreads = 0;           /**< number of CPU threads*/
+  uint32_t _frames_processed = 0;
+  int64_t _frame_num = 0;
+
+  ov::Core _core; /**< the OpenVINO core object */
+  unique_ptr<ResultBase> _result; /**< the result of the model inference */
+  OutputTransform _output_transform; /**< the output transform object for resizing the RGB frame */
+  unique_ptr<ModelBase> _model; /**< the model object for human pose estimation */
+  AsyncPipeline *_pipeline; /**< the OpenVINO pipeline for human pose estimation */
+  vector<HumanPose> _poses_openpose; /**<  contains all the keypoints of all identified people */
 
 };
 

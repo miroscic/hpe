@@ -60,6 +60,7 @@ if(WIN32)
 else()
   find_path(OPENVINO_INCLUDE_DIR NAMES openvino.hpp 
     PATHS /opt/intel/openvino_2024.4.0/runtime/include
+    PATHS /opt/intel/openvino_2024.6.0/runtime/include
     PATHS /opt/intel/openvino_2025.2.0/runtime/include
     PATH_SUFFIXES openvino
   )
@@ -119,6 +120,23 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
   ${json_SOURCE_DIR}/include
   ${plugin_SOURCE_DIR}/src)
+
+
+if (UNIX)
+# LCCV
+  FetchContent_Declare(LCCV
+    GIT_REPOSITORY https://github.com/pbosetti/LCCV.git
+    GIT_TAG        HEAD
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(LCCV)
+  include_directories(${lccv_SOURCE_DIR}/include)
+# LibCamera
+  pkg_check_modules(LIBCAMERA REQUIRED libcamera)
+  if (LIBCAMERA_FOUND)
+    include_directories(${LIBCAMERA_INCLUDE_DIRS})
+  endif()
+endif()
 
 
 # MACROS #######################################################################
