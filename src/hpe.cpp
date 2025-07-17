@@ -1274,7 +1274,8 @@ public:
    */
   return_type acquire_frame( bool debug = false) {
 
-      cout << "Acquiring frame..." << endl;
+    cout << "Acquiring frame..." << endl;
+    _frame_time = chrono::steady_clock::now();
 
     if (_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
@@ -1797,6 +1798,7 @@ public:
               !(_cov2D_vec_TMP.array() == -1).all()) {
 
             float Z_tmp = _keypoints_list_azure[i].z;
+            // Matteo faccina arrabbiata perchè hardcoded
             float sigma_z = -0.000000000035541*Z_tmp*Z_tmp*Z_tmp+0.000000493877878*Z_tmp*Z_tmp - 0.001100245600022*Z_tmp+1.989206937961068; // KINECT AZURE model
             float variance_z = sigma_z * sigma_z;
 
