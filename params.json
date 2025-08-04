@@ -5,6 +5,8 @@
     "resolution_rgb": "1280x720",
     "fps": 25,
     "dummy": true,
+    "filter_point_cloud": true,
+    "camera_serial": "",
     "debug": {
         "setup_video_capture": true,
         "skeleton_from_depth_compute": true,
