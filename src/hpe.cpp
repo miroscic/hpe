@@ -1081,11 +1081,17 @@ public:
 
       _kinect_tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
       if (_params.contains("CUDA")) {
-        cout << "Body tracker CUDA processor enabled: " << _params["CUDA"] << endl;
-        if (_params["CUDA"] == true)
+        if (_params["CUDA"] == true) {
+          cout << "Body tracker CUDA processor enabled" << endl;
           _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
+        } else {
+          cout << "Body tracker CUDA processor disabled! Using CPU instead." << endl;
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_CPU;
+        }
       }
-      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, K4ABT_TRACKER_CONFIG_DEFAULT);
+      cout << "Body tracker processing mode: " << _kinect_tracker_config.processing_mode << endl;
+      
+      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, _kinect_tracker_config);
 
       // acquire a frame just to get the resolution
       _kinect_device.get_capture(&_k4a_rgbd_capture, std::chrono::milliseconds(K4A_WAIT_INFINITE));
@@ -1343,11 +1349,15 @@ public:
       // We can use again the C++ API to create the _kinect_tracker
       _kinect_tracker_config = K4ABT_TRACKER_CONFIG_DEFAULT;
       if (_params.contains("CUDA")) {
-        cout << "Body tracker CUDA processor enabled: " << _params["CUDA"] << endl;
-        if (_params["CUDA"] == true)
+        if (_params["CUDA"] == true) {
+          cout << "Body tracker CUDA processor enabled" << endl;
           _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
+        } else {
+          cout << "Body tracker CUDA processor disabled! Using CPU instead." << endl;
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_CPU;
+        }
       }
-      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, K4ABT_TRACKER_CONFIG_DEFAULT);
+      _kinect_tracker = k4abt::tracker::create(_kinect_calibration, _kinect_tracker_config);
 
       cout << "Attempting to get first capture from MKV file..." << endl;
       if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
@@ -1916,7 +1926,6 @@ public:
             write_ply_from_cv_mat(_point_cloud, ply_filename.c_str());
           }
         }
-        }
       } else{
         // Handle case when body index map is null OR when filtering is disabled
         if(_body_index_map == nullptr) {
@@ -1962,10 +1971,11 @@ public:
         }
       }
       #endif  
-
-      return return_type::success;
     }
 
+    return return_type::success;
+  }
+  
 
   /**
    * @brief Transform the 3D skeleton coordinates in the global reference frame
@@ -2392,8 +2402,8 @@ public:
 
   return_type viewer(bool debug = false) {
 
-    cout << "Launching viewer..." << endl;
-    if (debug){
+    if (debug) {
+      cout << "Launching viewer..." << endl;
 
       if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
 
