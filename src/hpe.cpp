@@ -1377,46 +1377,23 @@ public:
       
       _k4a_color_image = _k4a_rgbd_capture.get_color_image();
       _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
-      
-      cout << "During setup - Color image valid: " << (_k4a_color_image.is_valid() ? "Yes" : "No") << endl;
-      cout << "During setup - Depth image valid: " << (_k4a_depth_image.is_valid() ? "Yes" : "No") << endl;
-      
-      // If the color image is not valid, try to get the next frame
-      if (!_k4a_color_image.is_valid()) {
-        cout << "\033[1;33mFirst frame has no valid color image, trying next frame...\033[0m" << endl;
-        
+
+      while (!_k4a_color_image.is_valid())
+      {
+        cout << "\033[1;33mThis frame has no valid color image, trying next frame...\033[0m" << endl;
         if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
           cout << "\033[1;31mFailed to get second capture from dummy file during setup\033[0m" << endl;
           return return_type::error;
         }
-        
-        // Wrap the new C handle in a C++ object
+
         _k4a_rgbd_capture = k4a::capture(_kinect_mkv_capture_handle);
-        
-        if (!_k4a_rgbd_capture) {
-          cout << "\033[1;31mInvalid second capture from dummy file during setup\033[0m" << endl;
-          return return_type::error;
-        }
-        
         _k4a_color_image = _k4a_rgbd_capture.get_color_image();
         _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
-        
-        cout << "Second frame - Color image valid: " << (_k4a_color_image.is_valid() ? "Yes" : "No") << endl;
-        cout << "Second frame - Depth image valid: " << (_k4a_depth_image.is_valid() ? "Yes" : "No") << endl;
-        
-        // Final validation
-        if (!_k4a_color_image.is_valid()) {
-          cout << "\033[1;31mError: Still no valid color image found in MKV file\033[0m" << endl;
-          return return_type::error;
-        }
+
+        cout << "During setup - Color image valid: " << (_k4a_color_image.is_valid() ? "Yes" : "No") << endl;
+        cout << "During setup - Depth image valid: " << (_k4a_depth_image.is_valid() ? "Yes" : "No") << endl;
       }
-      
-      // Validate that we have both valid color and depth images before proceeding
-      if (!_k4a_depth_image.is_valid()) {
-        cout << "\033[1;31mError: No valid depth image available in MKV file\033[0m" << endl;
-        return return_type::error;
-      }
-      
+
       _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
 
       //TODO: è da fare nel distruttore
