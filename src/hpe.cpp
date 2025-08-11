@@ -1060,6 +1060,8 @@ public:
       _kinect_device = k4a::device::open(_azure_device);
       _kinect_device.start_cameras(&_device_config);
 
+      _agent_id = _kinect_device.get_serialnum();
+
       _kinect_calibration = _kinect_device.get_calibration(_device_config.depth_mode, _device_config.color_resolution);
       
       // Get the depth camera intrinsics
@@ -1205,6 +1207,23 @@ public:
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
       _kinect_mkv_playback_handle = nullptr;
+
+      std::filesystem::path dummy_json_path = std::filesystem::path(_params["dummy_file_path"].get<string>()).parent_path() / "camera_id.json";
+      if (std::filesystem::exists(dummy_json_path)) {
+        try {
+          std::ifstream dummy_json_file(dummy_json_path);
+          if (dummy_json_file.is_open()) {
+            json dummy_json;
+            dummy_json_file >> dummy_json;
+            dummy_json_file.close();
+            if (dummy_json.contains("id") && dummy_json["id"].is_string()) {
+              _agent_id = dummy_json["id"].get<std::string>();
+            }
+          }
+        } catch (const std::exception& e) {
+          std::cout << "\033[1;33mWarning: Could not read camera_id.json: " << e.what() << "\033[0m" << std::endl;
+        }
+      }
 
       // A C++ Wrapper for the k4a_playback_t does not exist, so we use the C API directly
       if (k4a_playback_open(_params["dummy_file_path"].get<string>().c_str(), &_kinect_mkv_playback_handle) != K4A_RESULT_SUCCEEDED) {
