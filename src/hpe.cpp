@@ -1587,7 +1587,16 @@ public:
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
 
-      if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
+      k4a_stream_result_t stream_result = k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle);
+      if (stream_result == K4A_STREAM_RESULT_EOF) {
+        cout << "\033[1;31mEnd of MKV file reached. Terminating plugin execution.\033[0m" << endl;
+        // Clean up resources before terminating
+        if (_kinect_mkv_playback_handle) {
+          k4a_playback_close(_kinect_mkv_playback_handle);
+          _kinect_mkv_playback_handle = nullptr;
+        }
+        exit(0); // Terminate the process
+      } else if (stream_result != K4A_STREAM_RESULT_SUCCEEDED) {
         cout << "\033[1;31mFailed to get next capture from dummy file\033[0m" << endl;
         return return_type::error;
       }
