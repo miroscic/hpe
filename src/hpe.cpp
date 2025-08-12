@@ -1536,7 +1536,7 @@ public:
    * @author Nicola
    * @return result status ad defined in return_type
    */
-  return_type acquire_frame( bool debug = false, const string& camera_serial = "") {
+  return_type acquire_frame( bool debug = false) {
 
     _frame_time = chrono::steady_clock::now();
 
@@ -1687,33 +1687,6 @@ public:
           cout << "\033[1;33mWarning: Failed to create image debug directories: " << e.what() << "\033[0m" << endl;
         }
         
-        // Get camera serial from user parameter or ask for input
-        string camera_serial = "unknown";
-        try {
-          // First check if camera_serial is provided in params.json
-          if (_params.contains("camera_serial") && !_params["camera_serial"].get<string>().empty()) {
-            camera_serial = _params["camera_serial"].get<string>();
-          } else {
-            // Ask user for camera serial input
-            cout << "\033[1;36mPlease enter the camera serial number: \033[0m";
-            std::getline(std::cin, camera_serial);
-            
-            // If user doesn't provide input, use MKV filename as fallback
-            if (camera_serial.empty()) {
-              std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
-              camera_serial = mkv_path.stem().string();
-              cout << "\033[1;33mNo serial provided, using MKV filename: " << camera_serial << "\033[0m" << endl;
-            } else {
-              cout << "\033[1;32mUsing camera serial: " << camera_serial << "\033[0m" << endl;
-            }
-          }
-        } catch (const std::exception& e) {
-          cout << "\033[1;33mWarning: Could not get camera serial, using default: " << e.what() << "\033[0m" << endl;
-          // Fallback to MKV filename
-          std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
-          camera_serial = mkv_path.stem().string();
-        }
-        
         // Get timestamp from JSON file associated with MKV
         string timestamp = "";
         bool has_timestamp = false;
@@ -1749,16 +1722,17 @@ public:
           cout << "\033[1;33mWarning: Could not read timestamp from JSON, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
         }
         
+        
         // Create filenames with camera serial and timestamp (if available)
         string rgb_filename, depth_filename, normal_rgb_filename;
         if (has_timestamp) {
-          rgb_filename = (rgb_debug_dir / ("rgbd_" + camera_serial + "_t_" + timestamp + ".png")).string();
-          depth_filename = (depth_debug_dir / ("depth_" + camera_serial + "_t_" + timestamp + ".png")).string();
-          //normal_rgb_filename = (rgb_debug_dir / ("rgb_" + camera_serial + "_t_" + timestamp + ".png")).string();
+          rgb_filename = (rgb_debug_dir / ("rgbd_" + _agent_id + "_t_" + timestamp + ".png")).string();
+          depth_filename = (depth_debug_dir / ("depth_" + _agent_id + "_t_" + timestamp + ".png")).string();
+          //normal_rgb_filename = (rgb_debug_dir / ("rgb_" + _agent_id + "_t_" + timestamp + ".png")).string();
         } else {
-          rgb_filename = (rgb_debug_dir / ("rgbd_" + camera_serial + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
-          depth_filename = (depth_debug_dir / ("depth_" + camera_serial + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
-          //normal_rgb_filename = (rgb_debug_dir / ("rgb_" + camera_serial + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
+          rgb_filename = (rgb_debug_dir / ("rgbd_" + _agent_id + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
+          depth_filename = (depth_debug_dir / ("depth_" + _agent_id + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
+          //normal_rgb_filename = (rgb_debug_dir / ("rgb_" + _agent_id + "_f_" + std::to_string(_global_frame_counter) + ".png")).string();
         }
         
         // Save the RGB image (in depth coordinates)
@@ -2504,7 +2478,7 @@ public:
 
     out["agent_id"] = _agent_id;
 
-    if (acquire_frame(_params["debug"]["acquire_frame"], _params["camera_serial"]) == return_type::error) {
+    if (acquire_frame(_params["debug"]["acquire_frame"]) == return_type::error) {
       return return_type::error;
     }
     
