@@ -1208,20 +1208,20 @@ public:
       #ifdef KINECT_AZURE_LIBS
       _kinect_mkv_playback_handle = nullptr;
 
-      std::filesystem::path dummy_json_path = std::filesystem::path(_params["dummy_file_path"].get<string>()).parent_path() / "camera_id.json";
-      if (std::filesystem::exists(dummy_json_path)) {
+      std::filesystem::path camera_id_path = std::filesystem::path(_params["dummy_file_path"].get<string>()).parent_path() / "camera_id.txt";
+      if (std::filesystem::exists(camera_id_path)) {
         try {
-          std::ifstream dummy_json_file(dummy_json_path);
-          if (dummy_json_file.is_open()) {
-            json dummy_json;
-            dummy_json_file >> dummy_json;
-            dummy_json_file.close();
-            if (dummy_json.contains("id") && dummy_json["id"].is_string()) {
-              _agent_id = dummy_json["id"].get<std::string>();
+          std::ifstream camera_id_file(camera_id_path);
+          if (camera_id_file.is_open()) {
+            std::string id;
+            std::getline(camera_id_file, id);
+            camera_id_file.close();
+            if (!id.empty()) {
+              _agent_id = id;
             }
           }
         } catch (const std::exception& e) {
-          std::cout << "\033[1;33mWarning: Could not read camera_id.json: " << e.what() << "\033[0m" << std::endl;
+          std::cout << "\033[1;33mWarning: Could not read camera_id.txt: " << e.what() << "\033[0m" << std::endl;
         }
       }
 
@@ -1635,6 +1635,39 @@ public:
         return return_type::error;
       }
       
+      // Get timestamp from JSON file associated with MKV
+      try {
+        // Look for JSON file with same name as MKV in dummy directory
+        std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
+        std::filesystem::path json_path = mkv_path.parent_path() / (mkv_path.stem().string() + ".json");
+        
+        if (std::filesystem::exists(json_path)) {
+          std::ifstream json_file(json_path);
+          if (json_file.is_open()) {
+            json json_data;
+            json_file >> json_data;
+            json_file.close();
+            
+            // Look for array of frame objects with timestamp_ns
+            if (json_data.is_array()) {
+              for (const auto& frame_obj : json_data) {
+                if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
+                  int frame_number = frame_obj["frame"].get<int>();
+                  if (frame_number == _global_frame_counter) {
+                    // Convert timestamp_ns (nanoseconds since epoch) to chrono::steady_clock::time_point
+                    auto ns = frame_obj["timestamp_ns"].get<long long>();
+                    _frame_time = chrono::steady_clock::time_point(chrono::nanoseconds(ns));
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (const std::exception& e) {
+        cout << "\033[1;33mWarning: Could not read timestamp from JSON, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
+      }
+
       // Debug section: save RGB and depth images
       if (debug) {
         // Create debug directory paths relative to the source file location
@@ -1703,6 +1736,7 @@ public:
                     int frame_number = frame_obj["frame"].get<int>();
                     if (frame_number == _global_frame_counter) {
                       timestamp = std::to_string(frame_obj["timestamp_ns"].get<long long>());
+                      _frame_time = chrono::steady_clock::now();
                       has_timestamp = true;
                       break;
                     }
@@ -2469,12 +2503,13 @@ public:
     out.clear();
 
     out["agent_id"] = _agent_id;
-    out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
 
     if (acquire_frame(_params["debug"]["acquire_frame"], _params["camera_serial"]) == return_type::error) {
       return return_type::error;
     }
-
+    
+    // Update frame timestamp
+    out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
     if (skeleton_from_depth_compute(
             _params["debug"]["skeleton_from_depth_compute"]) ==
