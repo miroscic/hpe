@@ -1031,9 +1031,6 @@ public:
 
   return_type setup_video_capture(bool debug = false) {
 
-    // Initialize global frame counter
-    _global_frame_counter = 0;
-
     size_t found = _resolution_rgb.find("x");
     int rgb_width_read = 1280;
     int rgb_height_read = 720;
@@ -1207,7 +1204,8 @@ public:
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
       _kinect_mkv_playback_handle = nullptr;
-
+      
+      // Get camera id from txt file
       std::filesystem::path camera_id_path = std::filesystem::path(_params["dummy_file_path"].get<string>()).parent_path() / "camera_id.txt";
       if (std::filesystem::exists(camera_id_path)) {
         try {
@@ -1223,6 +1221,35 @@ public:
         } catch (const std::exception& e) {
           std::cout << "\033[1;33mWarning: Could not read camera_id.txt: " << e.what() << "\033[0m" << std::endl;
         }
+      }
+
+      // Get timestamp from JSON file associated with MKV
+      try {
+        // Look for JSON file with same name as MKV in dummy directory
+        std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
+        std::filesystem::path json_path = mkv_path.parent_path() / (mkv_path.stem().string() + ".json");
+        
+        if (std::filesystem::exists(json_path)) {
+          std::ifstream json_file(json_path);
+          if (json_file.is_open()) {
+            json json_data;
+            json_file >> json_data;
+            json_file.close();
+            
+            // Look for array of frame objects with timestamp_ns
+            if (json_data.is_array()) {
+              for (const auto& frame_obj : json_data) {
+                if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
+                  int frame_number = frame_obj["frame"].get<int>();
+                  auto ns = frame_obj["timestamp_ns"].get<long long>();;
+                  _frame_timestamps[frame_number] = chrono::steady_clock::time_point(chrono::nanoseconds(ns));
+                }
+              }
+            }
+          }
+        }
+      } catch (const std::exception& e) {
+        cout << "\033[1;33mWarning: Could not read timestamp from JSON, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
       }
 
       // A C++ Wrapper for the k4a_playback_t does not exist, so we use the C API directly
@@ -1399,6 +1426,7 @@ public:
 
       while (!_k4a_color_image.is_valid())
       {
+        _global_frame_counter++;
         cout << "\033[1;33mThis frame has no valid color image, trying next frame...\033[0m" << endl;
         if (k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle) != K4A_RESULT_SUCCEEDED) {
           cout << "\033[1;31mFailed to get second capture from dummy file during setup\033[0m" << endl;
@@ -1502,7 +1530,15 @@ public:
       return return_type::error;
     }
 
-    _frame_time = chrono::steady_clock::now();
+    if (_video_source != KINECT_AZURE_DUMMY && _video_source != RGB_CAMERA_DUMMY && _video_source != RASPI_RGB_CAMERA_DUMMY)
+      _frame_time = chrono::steady_clock::now();
+    else{
+      _frame_time = _frame_timestamps[_global_frame_counter];
+      cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
+      cout << "Frame counter: " << _global_frame_counter << endl;
+    }
+    _global_frame_counter++;
+
     cv::Size resolution = _rgb.size();
 
     // If KINECT_AZURE don't change the resolution because the rgb image 
@@ -1520,7 +1556,7 @@ public:
     _rgb_height = resolution.height;
     _rgb_width = resolution.width;
 
-    _global_frame_counter++;
+    
 
     return return_type::success;
   }
@@ -1587,6 +1623,13 @@ public:
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
 
+      // get time of the current frame
+      _frame_time = _frame_timestamps[_global_frame_counter];
+      cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
+      cout << "Frame counter: " << _global_frame_counter << endl;
+      // Increment global frame counter after each frame processing (success or failure)
+      _global_frame_counter++;
+
       k4a_stream_result_t stream_result = k4a_playback_get_next_capture(_kinect_mkv_playback_handle, &_kinect_mkv_capture_handle);
       if (stream_result == K4A_STREAM_RESULT_EOF) {
         cout << "\033[1;31mEnd of MKV file reached. Terminating plugin execution.\033[0m" << endl;
@@ -1644,39 +1687,6 @@ public:
         return return_type::error;
       }
       
-      // Get timestamp from JSON file associated with MKV
-      try {
-        // Look for JSON file with same name as MKV in dummy directory
-        std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
-        std::filesystem::path json_path = mkv_path.parent_path() / (mkv_path.stem().string() + ".json");
-        
-        if (std::filesystem::exists(json_path)) {
-          std::ifstream json_file(json_path);
-          if (json_file.is_open()) {
-            json json_data;
-            json_file >> json_data;
-            json_file.close();
-            
-            // Look for array of frame objects with timestamp_ns
-            if (json_data.is_array()) {
-              for (const auto& frame_obj : json_data) {
-                if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
-                  int frame_number = frame_obj["frame"].get<int>();
-                  if (frame_number == _global_frame_counter) {
-                    // Convert timestamp_ns (nanoseconds since epoch) to chrono::steady_clock::time_point
-                    auto ns = frame_obj["timestamp_ns"].get<long long>();
-                    _frame_time = chrono::steady_clock::time_point(chrono::nanoseconds(ns));
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (const std::exception& e) {
-        cout << "\033[1;33mWarning: Could not read timestamp from JSON, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
-      }
-
       // Debug section: save RGB and depth images
       if (debug) {
         // Create debug directory paths relative to the source file location
@@ -1695,43 +1705,18 @@ public:
         } catch (const std::filesystem::filesystem_error& e) {
           cout << "\033[1;33mWarning: Failed to create image debug directories: " << e.what() << "\033[0m" << endl;
         }
-        
-        // Get timestamp from JSON file associated with MKV
+
+        // Get timestamp from JSON file associated with MKV loaded in setup_video_capture
         string timestamp = "";
         bool has_timestamp = false;
         try {
-          // Look for JSON file with same name as MKV in dummy directory
-          std::filesystem::path mkv_path(_params["dummy_file_path"].get<string>());
-          std::filesystem::path json_path = mkv_path.parent_path() / (mkv_path.stem().string() + ".json");
-          
-          if (std::filesystem::exists(json_path)) {
-            std::ifstream json_file(json_path);
-            if (json_file.is_open()) {
-              json json_data;
-              json_file >> json_data;
-              json_file.close();
-              
-              // Look for array of frame objects with timestamp_ns
-              if (json_data.is_array()) {
-                for (const auto& frame_obj : json_data) {
-                  if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
-                    int frame_number = frame_obj["frame"].get<int>();
-                    if (frame_number == _global_frame_counter) {
-                      timestamp = std::to_string(frame_obj["timestamp_ns"].get<long long>());
-                      _frame_time = chrono::steady_clock::now();
-                      has_timestamp = true;
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (const std::exception& e) {
-          cout << "\033[1;33mWarning: Could not read timestamp from JSON, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
+          timestamp = std::to_string(_frame_time.time_since_epoch().count());
+          has_timestamp = true;
         }
-        
-        
+        catch (const std::out_of_range& e) {
+          cout << "\033[1;33mWarning: Could not read timestamp from MKV, proceeding without timestamp: " << e.what() << "\033[0m" << endl;
+        }
+
         // Create filenames with camera serial and timestamp (if available)
         string rgb_filename, depth_filename, normal_rgb_filename;
         if (has_timestamp) {
@@ -1775,8 +1760,7 @@ public:
       return return_type::error;
     } 
     
-    // Increment global frame counter after each frame processing (success or failure)
-    _global_frame_counter++;
+    
     
     return return_type::success;
   }
@@ -2711,7 +2695,8 @@ protected:
   AsyncPipeline *_pipeline; /**< the OpenVINO pipeline for human pose estimation */
   vector<HumanPose> _poses_openpose; /**<  contains all the keypoints of all identified people */
 
-  int _global_frame_counter = 0; /**< global frame counter for debugging */
+  int _global_frame_counter = 0; /**< global frame counter for dummy */
+  map<int, chrono::steady_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
 
 };
 
