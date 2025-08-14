@@ -1779,9 +1779,9 @@ public:
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
       if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
-      // It should never hit timeout when K4A_WAIT_INFINITE is set.
-      cout << "Error! Add capture to tracker process queue timeout!" << endl;
-      return return_type::error;
+        // It should never hit timeout when K4A_WAIT_INFINITE is set.
+        cout << "Error! Add capture to tracker process queue timeout!" << endl;
+        return return_type::error;
       } 
 
       _body_frame = _kinect_tracker.pop_result();
@@ -1789,7 +1789,7 @@ public:
       if (_body_frame != nullptr) {
         if (_body_frame.get_num_bodies() == 0) {
             cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
-          return return_type::success;
+          return return_type::error;
         }
         
         // Only take one body (always the first one)
@@ -1842,11 +1842,8 @@ public:
         cout << "Error! Pop body frame result time out!" << endl;
         return return_type::error;
       }
-
-      return return_type::success;  
       #endif  
 
-    return return_type::success;
     }
   
     return return_type::success;
@@ -2469,50 +2466,38 @@ public:
 
     out.clear();
 
-    out["agent_id"] = _agent_id;
+    if (!_agent_id.empty()) out["agent_id"] = _agent_id;
 
     if (acquire_frame(_params["debug"]["acquire_frame"]) == return_type::error) {
       return return_type::error;
     }
-    
-    // Update frame timestamp
+
+    // Update frame timestamp after acquiring frame
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
-    if (skeleton_from_depth_compute(
-            _params["debug"]["skeleton_from_depth_compute"]) ==
-        return_type::error) {
+    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
       return return_type::error;
     }
     
-
-    if (point_cloud_filter(_params["debug"]["point_cloud_filter"], 
-                           _params.contains("filter_point_cloud") ? _params["filter_point_cloud"] : true) ==
-        return_type::error) {
-      return return_type::error;
-    }
-    
-    
-    if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) ==
-        return_type::error) {
-      return return_type::error;
-    }
-    
-
-    if (hessian_compute(_params["debug"]["hessian_compute"]) ==
-        return_type::error) {
+    if (point_cloud_filter(_params["debug"]["point_cloud_filter"], _params.contains("filter_point_cloud") ? _params["filter_point_cloud"] : true) == return_type::error) {
       return return_type::error;
     }
 
-    if (cov3D_compute(_params["debug"]["cov3D_compute"]) ==
-        return_type::error) {
+    if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+
+    if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+
+    if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
       return return_type::error;
     }
 
     if (viewer(_params["debug"]["viewer"]) == return_type::error) {
       return return_type::error;
     }
-        
-    if (!_agent_id.empty()) out["agent_id"] = _agent_id;
     
 
     // Prepare output 
