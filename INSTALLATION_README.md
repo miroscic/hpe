@@ -62,3 +62,46 @@ cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$(mads -p)"
 cmake --build build --config Release
 cmake --build build --config Release -t install
 
+Per installare correttamente MONGO seguire questi passi:
+- Installare ed avviare docker (non è necessario fare per forza il login)
+https://www.docker.com/
+- Installare mongo su docker mediante questo comando: 
+docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo
+- Per fare funzionare il logger c'è bisogno di installare i driver di mongo in locale, andare quindi a questo link:
+https://www.mongodb.com/docs/languages/cpp/cpp-driver/current/get-started/ e seguire le istruzioni.
+
+curl -OL https://github.com/mongodb/mongo-cxx-driver/releases/download/r4.1.1/mongo-cxx-driver-r4.1.1.tar.gz
+Se la powershell non riconosce il comando -OL scaricare direttamente il file tar dal link (basta andare al link che il download parte in automatico)
+tar -xzf mongo-cxx-driver-r4.1.1.tar.gz
+cd mongo-cxx-driver-r4.1.1/build
+
+cmake -G "Visual Studio <version> <year>" -A "x64" -DCMAKE_CXX_STANDARD=17 -DCMAKE_INSTALL_PREFIX=C:\mongo-cxx-driver   
+Al posto di <version> mettere 17 e al posto di <year> mettere 2022
+
+cmake --build . --config RelWithDebInfo
+cmake --build . --target install --config RelWithDebInfo
+
+Aggiungere al path il percorso di installazione:
+"C:\mongo-cxx-driver\bin"
+
+-----------------------
+Come eseguire il broker, il logger e gli agenti hpe.
+
+Per trovare l'ip del broker da fornire agli agenti che non girano sullo stesso pc esegui:
+mads-broker -n list
+
+Ora puoi terminare il broker.
+Il comando precedente mostra gli indirizzi ip relativi alla scheda di rete. Scegliere una scheda di rete ed il relativo nome/numero (per esempio "en0" oppure "11") ed esegui di nuovo il broker ma con questo comando (se hai scelto en0):
+mads-broker -n en0
+
+Il terminale mostrerà l'indirizzo <IP> e la <PORT> a cui devono collegarsi tutti gli agenti. Se girano sullo stesso pc del broker non è necessario indicare <IP> e <PORT>
+
+Se vuoi salvare i dati in MONGO apri docker e fai partire il container oppure esegui
+docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo 
+
+Apri MongoDB Compass e connettiti.
+Esegui il logger:
+mads-logger
+
+Esegui gli agenti hpe:
+mads-source -s tcp://<IP>:<PORT> hpe.plugin 
