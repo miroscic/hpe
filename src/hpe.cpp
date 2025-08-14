@@ -1534,8 +1534,8 @@ public:
       _frame_time = chrono::steady_clock::now();
     else{
       _frame_time = _frame_timestamps[_global_frame_counter];
-      cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
-      cout << "Frame counter: " << _global_frame_counter << endl;
+      //cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
+      //cout << "Frame counter: " << _global_frame_counter << endl;
     }
     _global_frame_counter++;
 
@@ -1656,8 +1656,8 @@ public:
       _k4a_color_image = _k4a_rgbd_capture.get_color_image();
       _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
       
-      cout << "Color image valid: " << (_k4a_color_image.is_valid() ? "Yes" : "No") << endl;
-      cout << "Depth image valid: " << (_k4a_depth_image.is_valid() ? "Yes" : "No") << endl;
+      //cout << "Color image valid: " << (_k4a_color_image.is_valid() ? "Yes" : "No") << endl;
+      //cout << "Depth image valid: " << (_k4a_depth_image.is_valid() ? "Yes" : "No") << endl;
       
       // Validate the color image before transformation
       if (!_k4a_color_image.is_valid()) {
