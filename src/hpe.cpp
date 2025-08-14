@@ -1534,8 +1534,8 @@ public:
       _frame_time = chrono::steady_clock::now();
     else{
       _frame_time = _frame_timestamps[_global_frame_counter];
-      //cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
-      //cout << "Frame counter: " << _global_frame_counter << endl;
+      cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
+      cout << "Frame counter: " << _global_frame_counter << endl;
     }
     _global_frame_counter++;
 
@@ -1625,8 +1625,9 @@ public:
 
       // get time of the current frame
       _frame_time = _frame_timestamps[_global_frame_counter];
-      cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
-      cout << "Frame counter: " << _global_frame_counter << endl;
+      //cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
+      //cout << "Frame counter: " << _global_frame_counter << endl;
+      
       // Increment global frame counter after each frame processing (success or failure)
       _global_frame_counter++;
 
