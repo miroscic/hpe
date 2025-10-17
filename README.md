@@ -70,6 +70,20 @@ The plugin supports the following settings in the INI file:
 ```ini
 [hpe]
 # Describe the settings available to the plugin
+
+[hpe.SN000367520812]
+Rxx = 1
+Rxy = 0
+Rxz = 0
+Ryx = 0
+Ryy = 1
+Ryz = 0
+Rzx = 0
+Rzy = 0
+Rzz = 1
+Tx = 0
+Ty = 0
+Tz = 0
 ```
 
 All settings are optional; if omitted, the default values are used.
