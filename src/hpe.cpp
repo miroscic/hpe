@@ -523,512 +523,6 @@ public:
     }
   }
 
-  #ifdef KINECT_AZURE_LIBS
-  k4a::image transform_color_to_depth_coordinates(k4a_transformation_t transformation_handle, 
-                                                  k4a::image color_image, 
-                                                  k4a::image depth_image) {
-    if (!depth_image.is_valid()) {
-      cout << "\033[1;33mWarning: No depth image available, skipping color-to-depth transformation\033[0m" << endl;
-      return color_image;
-    }
-    
-    if (!color_image.is_valid()) {
-      cout << "\033[1;31mError: Invalid color image provided for transformation\033[0m" << endl;
-      return color_image;
-    }
-    
-    // Check if the color image is compressed (JPEG) or raw (BGRA32)
-    k4a_image_format_t color_format = color_image.get_format();
-    
-    k4a::image color_image_for_transform;
-    
-    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-      color_image_for_transform = color_image;
-    } else {
-      // Decompress the image to get raw BGRA32 data
-      size_t buffer_size = color_image.get_size();
-      uint8_t *compressed_buffer = color_image.get_buffer();
-      
-      // Create a temporary Mat from the compressed buffer
-      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
-      
-      // Decode the compressed image
-      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
-      
-      if (decoded_image.empty()) {
-        cout << "\033[1;31mFailed to decode compressed image for transformation!\033[0m" << endl;
-        return color_image; // Use original as fallback
-      }
-      
-      // Convert BGR to BGRA
-      cv::Mat bgra_image;
-      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
-      
-      // Create a new k4a::image with the decompressed BGRA data
-      color_image_for_transform = k4a::image::create(
-        K4A_IMAGE_FORMAT_COLOR_BGRA32,
-        bgra_image.cols,
-        bgra_image.rows,
-        bgra_image.cols * 4 * sizeof(uint8_t)
-      );
-      
-      if (color_image_for_transform.is_valid()) {
-        // Copy the BGRA data to the k4a::image
-        uint8_t *k4a_buffer = color_image_for_transform.get_buffer();
-        memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
-      } else {
-        cout << "\033[1;33mWarning: Failed to create BGRA32 k4a::image, using original\033[0m" << endl;
-        return color_image;
-      }
-    }
-    
-    // Now proceed with the transformation using the BGRA32 image
-    if (color_image_for_transform.is_valid() && color_image_for_transform.get_format() == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-      // Create a new k4a::image for the transformed color image
-      k4a::image transformed_color_image = k4a::image::create(
-        K4A_IMAGE_FORMAT_COLOR_BGRA32,
-        depth_image.get_width_pixels(),
-        depth_image.get_height_pixels(),
-        depth_image.get_width_pixels() * 4 * sizeof(uint8_t)
-      );
-      
-      if (transformed_color_image.is_valid()) {
-        // Transform color image to depth camera coordinates
-        k4a_result_t transform_result = k4a_transformation_color_image_to_depth_camera(
-          transformation_handle,
-          depth_image.handle(),
-          color_image_for_transform.handle(),
-          transformed_color_image.handle()
-        );
-        
-        if (transform_result == K4A_RESULT_SUCCEEDED) {
-          return transformed_color_image;
-        } else {
-          cout << "\033[1;33mWarning: Color to depth transformation failed, using original color image\033[0m" << endl;
-        }
-      } else {
-        cout << "\033[1;33mWarning: Failed to create transformed color image buffer\033[0m" << endl;
-      }
-    } else {
-      cout << "\033[1;33mWarning: Cannot transform - color image is not in BGRA32 format\033[0m" << endl;
-    }
-    
-    return color_image; // Return original if transformation failed
-  }
-  #endif
-
-  #ifdef KINECT_AZURE_LIBS
-  return_type k4a_color_image_to_cv_mat(k4a::image k4a_image, cv::Mat& output_mat) {
-    
-    if (!k4a_image.is_valid()) {
-      cout << "\033[1;31mInvalid k4a::image provided\033[0m" << endl;
-      return return_type::error;
-    }
-    
-    int rows = k4a_image.get_height_pixels();
-    int cols = k4a_image.get_width_pixels();
-    
-    // Check buffer size
-    size_t buffer_size = k4a_image.get_size();
-    uint8_t *buffer = k4a_image.get_buffer();
-    
-    // Calculate expected buffer size
-    size_t expected_size = rows * cols * 4; // 4 bytes per pixel for BGRA
-    
-    // Get the stride (bytes per row) from the image
-    size_t stride = k4a_image.get_stride_bytes();
-    
-    // Check image format
-    k4a_image_format_t format = k4a_image.get_format();
-    
-    if (stride == 0 || buffer_size < expected_size) {
-      // Handle compressed image
-      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
-      
-      // Decode the compressed image
-      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
-      
-      if (decoded_image.empty()) {
-        cout << "\033[1;31mFailed to decode compressed image!\033[0m" << endl;
-        return return_type::error;
-      }
-
-      // Convert to BGR if necessary (OpenCV imdecode usually returns BGR)
-      if (decoded_image.channels() == 3) {
-        output_mat = decoded_image.clone();
-      } else {
-        cv::cvtColor(decoded_image, output_mat, cv::COLOR_BGRA2BGR);
-      }
-    } else {
-      // Handle raw BGRA data
-      try {
-        cv::Mat temp_mat = cv::Mat(rows, cols, CV_8UC4, (void *)buffer, stride);
-        cv::cvtColor(temp_mat, output_mat, cv::COLOR_BGRA2BGR);
-      } catch (const cv::Exception& e) {
-        cout << "\033[1;31mColor conversion failed: " << e.what() << "\033[0m" << endl;
-        return return_type::error;
-      } catch (const std::exception& e) {
-        cout << "\033[1;31mException creating Mat: " << e.what() << "\033[0m" << endl;
-        return return_type::error;
-      }
-    }
-    
-    // Final check if Mat was created successfully
-    if (output_mat.empty()) {
-      cout << "\033[1;31mFailed to create cv::Mat from k4a::image!\033[0m" << endl;
-      return return_type::error;
-    }  
-
-    return return_type::success;
-  }
-  #endif
-
-  #ifdef KINECT_AZURE_LIBS
-  return_type k4a_depth_image_to_cv_mat(k4a::image k4a_depth_image, cv::Mat& output_mat) {
-    
-    if (!k4a_depth_image.is_valid()) {
-      cout << "\033[1;31mInvalid k4a depth image provided\033[0m" << endl;
-      return return_type::error;
-    }
-    
-    int rows = k4a_depth_image.get_height_pixels();
-    int cols = k4a_depth_image.get_width_pixels();
-    
-    // Check buffer size
-    size_t buffer_size = k4a_depth_image.get_size();
-    uint8_t *buffer = k4a_depth_image.get_buffer();
-    
-    // Calculate expected buffer size for raw depth image (2 bytes per pixel)
-    size_t expected_raw_size = rows * cols * 2; // 2 bytes per pixel for 16-bit depth
-    
-    // Get the stride (bytes per row) from the image
-    size_t stride = k4a_depth_image.get_stride_bytes();
-    
-    // Check image format
-    k4a_image_format_t format = k4a_depth_image.get_format();
-    
-    if (format != K4A_IMAGE_FORMAT_DEPTH16) {
-      cout << "\033[1;31mUnsupported depth image format: " << format << "\033[0m" << endl;
-      return return_type::error;
-    }
-    
-    // Check if the depth image is compressed (from MKV file)
-    if (stride == 0 || buffer_size < expected_raw_size) {
-      // Try to decompress using OpenCV (some MKV files use standard compression)
-      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
-      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_ANYDEPTH | cv::IMREAD_ANYCOLOR);
-      
-      if (!decoded_image.empty()) {
-        // Convert to 16-bit if necessary
-        if (decoded_image.type() == CV_16U) {
-          output_mat = decoded_image.clone();
-        } else {
-          decoded_image.convertTo(output_mat, CV_16U);
-        }
-      } else {
-        cout << "\033[1;33mWarning: Failed to decode compressed depth data with OpenCV\033[0m" << endl;
-        cout << "\033[1;33mAssuming raw depth data despite size mismatch\033[0m" << endl;
-        
-        // Fallback: try to interpret as raw data anyway
-        if (stride == 0) {
-          stride = cols * 2; // Default stride for 16-bit depth
-        }
-        
-        try {
-          cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
-          output_mat = temp_mat.clone();
-        } catch (const cv::Exception& e) {
-          cout << "\033[1;31mFailed to create Mat from raw depth data: " << e.what() << "\033[0m" << endl;
-          return return_type::error;
-        }
-      }
-    } else {
-      // Handle raw depth data (16-bit unsigned integers)
-      
-      try {
-        if (stride == 0) {
-          stride = cols * 2; // Default stride for 16-bit depth
-        }
-        
-        // Create Mat from raw depth data
-        cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
-        
-        // Clone the data to ensure it's owned by output_mat
-        output_mat = temp_mat.clone();
-        
-      } catch (const cv::Exception& e) {
-        cout << "\033[1;31mDepth image conversion failed: " << e.what() << "\033[0m" << endl;
-        return return_type::error;
-      } catch (const std::exception& e) {
-        cout << "\033[1;31mException creating depth Mat: " << e.what() << "\033[0m" << endl;
-        return return_type::error;
-      }
-    }
-    
-    // Final check if Mat was created successfully
-    if (output_mat.empty()) {
-      cout << "\033[1;31mFailed to create cv::Mat from k4a depth image!\033[0m" << endl;
-      return return_type::error;
-    }
-
-    return return_type::success;
-  }
-  #endif
-
-  #ifdef KINECT_AZURE_LIBS
-  void mask_depth_with_body_index(const k4a::image &depth_image,
-                                  const k4a::image &body_index_map,
-                                  k4a::image &masked_depth_image) {
-    // Get image dimensions
-    int width = depth_image.get_width_pixels();
-    int height = depth_image.get_height_pixels();
-
-    // Get pointers to the image data
-    const uint16_t *depth_data =
-        reinterpret_cast<const uint16_t *>(depth_image.get_buffer());
-    const uint8_t *body_index_data =
-        reinterpret_cast<const uint8_t *>(body_index_map.get_buffer());
-    uint16_t *masked_depth_data =
-        reinterpret_cast<uint16_t *>(masked_depth_image.get_buffer());
-
-    // Iterate over each pixel
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        int idx = y * width + x;
-
-        // Check if the pixel belongs to a body
-        if (body_index_data[idx] != K4ABT_BODY_INDEX_MAP_BACKGROUND) {
-          // Copy the depth value
-          masked_depth_data[idx] = depth_data[idx];
-        } else {
-          // Set to zero or any background value (e.g., 0 for no depth)
-          masked_depth_data[idx] = 0;
-        }
-      }
-    }
-  }
-  #endif
-
-  #ifdef KINECT_AZURE_LIBS
-  return_type create_point_cloud(k4a_transformation_t transformation_handle,
-                                   const k4a_image_t depth_image,
-                                   const k4a_image_t color_image) {
-    // Check if the color image is compressed (JPEG) or raw (BGRA32)
-    k4a_image_format_t color_format = k4a_image_get_format(color_image);
-    
-    k4a_image_t color_image_for_transform = NULL;
-    
-    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-      // Use the original image directly
-      color_image_for_transform = const_cast<k4a_image_t>(color_image);
-      k4a_image_reference(color_image_for_transform);
-    } else {
-      // Decompress the image to get raw BGRA32 data
-      size_t buffer_size = k4a_image_get_size(color_image);
-      uint8_t *compressed_buffer = k4a_image_get_buffer(color_image);
-      
-      // Create a temporary Mat from the compressed buffer
-      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
-      
-      // Decode the compressed image
-      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
-      
-      if (decoded_image.empty()) {
-        cout << "\033[1;31mFailed to decode compressed image for point cloud!\033[0m" << endl;
-        return return_type::error;
-      }
-      
-      // Convert BGR to BGRA
-      cv::Mat bgra_image;
-      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
-      
-      // Create a new k4a_image_t with the decompressed BGRA data
-      if (K4A_RESULT_SUCCEEDED != k4a_image_create(
-          K4A_IMAGE_FORMAT_COLOR_BGRA32,
-          bgra_image.cols,
-          bgra_image.rows,
-          bgra_image.cols * 4 * sizeof(uint8_t),
-          &color_image_for_transform)) {
-        cout << "\033[1;31mFailed to create BGRA32 k4a_image_t for point cloud\033[0m" << endl;
-        return return_type::error;
-      }
-      
-      // Copy the BGRA data to the k4a_image_t
-      uint8_t *k4a_buffer = k4a_image_get_buffer(color_image_for_transform);
-      memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
-    }
-    
-    int depth_image_width_pixels = k4a_image_get_width_pixels(depth_image);
-    int depth_image_height_pixels = k4a_image_get_height_pixels(depth_image);
-    k4a_image_t transformed_color_image = NULL;
-    if (K4A_RESULT_SUCCEEDED !=
-        k4a_image_create(K4A_IMAGE_FORMAT_COLOR_BGRA32,
-                          depth_image_width_pixels, depth_image_height_pixels,
-                          depth_image_width_pixels * 4 * (int)sizeof(uint8_t),
-                          &transformed_color_image)) {
-      printf("Failed to create transformed color image\n");
-      return return_type::error;
-    }
-
-    k4a_image_t point_cloud_image = NULL;
-    if (K4A_RESULT_SUCCEEDED !=
-        k4a_image_create(K4A_IMAGE_FORMAT_CUSTOM, depth_image_width_pixels,
-                          depth_image_height_pixels,
-                          depth_image_width_pixels * 3 * (int)sizeof(int16_t),
-                          &point_cloud_image)) {
-      printf("Failed to create point cloud image\n");
-      return return_type::error;
-    }
-
-    if (K4A_RESULT_SUCCEEDED !=
-        k4a_transformation_color_image_to_depth_camera(
-            transformation_handle, depth_image, color_image_for_transform,
-            transformed_color_image)) {
-      printf("Failed to compute transformed color image\n");
-      // Clean up the color image if it was created
-      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-        k4a_image_release(color_image_for_transform);
-      }
-      return return_type::error;
-    }
-
-    if (K4A_RESULT_SUCCEEDED != k4a_transformation_depth_image_to_point_cloud(
-                                    transformation_handle, depth_image,
-                                    K4A_CALIBRATION_TYPE_DEPTH,
-                                    point_cloud_image)) {
-      printf("Failed to compute point cloud\n");
-      // Clean up the color image if it was created
-      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-        k4a_image_release(color_image_for_transform);
-      }
-      return return_type::error;
-    }
-
-    std::vector<color_point_t> points;
-
-    int width = k4a_image_get_width_pixels(point_cloud_image);
-    int height = k4a_image_get_height_pixels(transformed_color_image);
-
-    int16_t *point_cloud_image_data =
-        (int16_t *)(void *)k4a_image_get_buffer(point_cloud_image);
-    uint8_t *color_image_data = k4a_image_get_buffer(transformed_color_image);
-
-    for (int i = 0; i < width * height; i++) {
-      color_point_t point;
-      point.xyz[0] = point_cloud_image_data[3 * i + 0];
-      point.xyz[1] = point_cloud_image_data[3 * i + 1];
-      point.xyz[2] = point_cloud_image_data[3 * i + 2];
-      if (point.xyz[2] == 0) {
-        continue;
-      }
-
-      point.rgb[0] = color_image_data[4 * i + 0];
-      point.rgb[1] = color_image_data[4 * i + 1];
-      point.rgb[2] = color_image_data[4 * i + 2];
-      uint8_t alpha = color_image_data[4 * i + 3];
-
-      if (point.rgb[0] == 0 && point.rgb[1] == 0 && point.rgb[2] == 0 &&
-          alpha == 0) {
-        continue;
-      }
-
-      points.push_back(point);
-    }
-
-    // convert the points to a point cloud of Mat type
-    _point_cloud = cv::Mat(points.size(), 6, CV_32F);
-    for (size_t i = 0; i < points.size(); i++) {
-      _point_cloud.at<float>(i, 0) = points[i].xyz[0];
-      _point_cloud.at<float>(i, 1) = points[i].xyz[1];
-      _point_cloud.at<float>(i, 2) = points[i].xyz[2];
-      _point_cloud.at<float>(i, 3) = points[i].rgb[2];
-      _point_cloud.at<float>(i, 4) = points[i].rgb[1];
-      _point_cloud.at<float>(i, 5) = points[i].rgb[0];
-    }
-
-    // Save the point cloud to a ply file
-    // write_ply_from_points_vector(points,
-    // "../plugin_skeletonizer_3D/test_points.ply");
-    // write_ply_from_cv_mat(_point_cloud,
-    // "../plugin_skeletonizer_3D/test_cv_mat.ply");
-
-    // Clean up the color image if it was created for decompression
-    if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
-      k4a_image_release(color_image_for_transform);
-    }
-
-    return return_type::success;
-  }
-  #endif
-
-  void write_ply_from_cv_mat(cv::Mat point_cloud, const char *file_name) {
-    #define PLY_START_HEADER "ply"
-    #define PLY_END_HEADER "end_header"
-    #define PLY_ASCII "format ascii 1.0"
-    #define PLY_ELEMENT_VERTEX "element vertex"
-
-    // save to the ply file
-    std::ofstream ofs(file_name); // text mode first
-    ofs << PLY_START_HEADER << std::endl;
-    ofs << PLY_ASCII << std::endl;
-    ofs << PLY_ELEMENT_VERTEX << " " << point_cloud.rows << std::endl;
-    ofs << "property float x" << std::endl;
-    ofs << "property float y" << std::endl;
-    ofs << "property float z" << std::endl;
-    ofs << "property uchar red" << std::endl;
-    ofs << "property uchar green" << std::endl;
-    ofs << "property uchar blue" << std::endl;
-    ofs << PLY_END_HEADER << std::endl;
-    ofs.close();
-
-    std::stringstream ss;
-    for (int i = 0; i < point_cloud.rows; ++i) {
-      ss << point_cloud.at<float>(i, 0) << " " << point_cloud.at<float>(i, 1)
-          << " " << point_cloud.at<float>(i, 2);
-      ss << " " << point_cloud.at<float>(i, 3) << " "
-          << point_cloud.at<float>(i, 4) << " " << point_cloud.at<float>(i, 5);
-      ss << std::endl;
-    }
-    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
-    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
-  }
-
-  static void write_ply_from_points_vector(std::vector<color_point_t> points,
-                                             const char *file_name) {
-
-    #define PLY_START_HEADER "ply"
-    #define PLY_END_HEADER "end_header"
-    #define PLY_ASCII "format ascii 1.0"
-    #define PLY_ELEMENT_VERTEX "element vertex"
-
-    // save to the ply file
-    std::ofstream ofs(file_name); // text mode first
-    ofs << PLY_START_HEADER << std::endl;
-    ofs << PLY_ASCII << std::endl;
-    ofs << PLY_ELEMENT_VERTEX << " " << points.size() << std::endl;
-    ofs << "property float x" << std::endl;
-    ofs << "property float y" << std::endl;
-    ofs << "property float z" << std::endl;
-    ofs << "property uchar red" << std::endl;
-    ofs << "property uchar green" << std::endl;
-    ofs << "property uchar blue" << std::endl;
-    ofs << PLY_END_HEADER << std::endl;
-    ofs.close();
-
-    std::stringstream ss;
-    for (size_t i = 0; i < points.size(); ++i) {
-      // image data is BGR
-      ss << (float)points[i].xyz[0] << " " << (float)points[i].xyz[1] << " "
-          << (float)points[i].xyz[2];
-      ss << " " << (float)points[i].rgb[2] << " " << (float)points[i].rgb[1]
-          << " " << (float)points[i].rgb[0];
-      ss << std::endl;
-    }
-    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
-    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
-  }
-
-
   return_type setup_video_capture(bool debug = false) {
 
     size_t found = _resolution_rgb.find("x");
@@ -1559,6 +1053,595 @@ public:
     
 
     return return_type::success;
+  }
+
+  /* Setup camera extrinsics from parameters
+  */
+  return_type setup_camera_extrinsics(bool debug = false) {
+    // Setup camera extrinsics if provided in parameters
+    
+    // Initialize transformation matrix as identity
+    _camera_transformation_matrix = Eigen::Matrix4f::Identity();
+    
+    // Check if camera serial number is provided in params
+    if (debug) {
+      cout << "\033[1;34mSetup camera extrinsics for camera serial: SN" << _agent_id << "\033[0m" << endl;
+    }
+    
+    // Check if transformation parameters exist for this camera serial
+    if (_params.contains("SN" + _agent_id)) {
+      auto camera_params = _params["SN" + _agent_id];
+      
+      // Read rotation matrix components
+      float Rxx = camera_params.contains("Rxx") ? camera_params["Rxx"].get<float>() : 1.0f;
+      float Rxy = camera_params.contains("Rxy") ? camera_params["Rxy"].get<float>() : 0.0f;
+      float Rxz = camera_params.contains("Rxz") ? camera_params["Rxz"].get<float>() : 0.0f;
+      float Ryx = camera_params.contains("Ryx") ? camera_params["Ryx"].get<float>() : 0.0f;
+      float Ryy = camera_params.contains("Ryy") ? camera_params["Ryy"].get<float>() : 1.0f;
+      float Ryz = camera_params.contains("Ryz") ? camera_params["Ryz"].get<float>() : 0.0f;
+      float Rzx = camera_params.contains("Rzx") ? camera_params["Rzx"].get<float>() : 0.0f;
+      float Rzy = camera_params.contains("Rzy") ? camera_params["Rzy"].get<float>() : 0.0f;
+      float Rzz = camera_params.contains("Rzz") ? camera_params["Rzz"].get<float>() : 1.0f;
+      
+      // Read translation vector components
+      float Tx = camera_params.contains("Tx") ? camera_params["Tx"].get<float>() : 0.0f;
+      float Ty = camera_params.contains("Ty") ? camera_params["Ty"].get<float>() : 0.0f;
+      float Tz = camera_params.contains("Tz") ? camera_params["Tz"].get<float>() : 0.0f;
+      
+      // Build the 4x4 transformation matrix
+      // [R11 R12 R13 Tx]
+      // [R21 R22 R23 Ty]
+      // [R31 R32 R33 Tz]
+      // [ 0   0   0   1]
+      _camera_transformation_matrix << Rxx, Rxy, Rxz, Tx,
+                                      Ryx, Ryy, Ryz, Ty,
+                                      Rzx, Rzy, Rzz, Tz,
+                                      0.0f, 0.0f, 0.0f, 1.0f;
+      
+      if (debug) {
+        cout << "\033[1;32mLoaded camera transformation matrix for SN" << _agent_id << "\033[0m" << endl;
+        cout << _camera_transformation_matrix << endl;
+      }
+    } else {
+      if (debug) {
+        cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
+      }
+      return return_type::warning;
+    }
+
+    return return_type::success;
+  }
+
+  /**
+   * Apply camera transformation matrix to a 3D point
+   * @param point The input 3D point (x, y, z)
+   * @return The transformed 3D point
+   */
+  Eigen::Vector3f apply_camera_transformation(const Eigen::Vector3f& point) {
+    // Convert 3D point to homogeneous coordinates
+    Eigen::Vector4f homogeneous_point(point.x(), point.y(), point.z(), 1.0f);
+    
+    // Apply transformation matrix
+    Eigen::Vector4f transformed_homogeneous = _camera_transformation_matrix * homogeneous_point;
+    
+    // Convert back to 3D coordinates
+    return Eigen::Vector3f(transformed_homogeneous.x(), transformed_homogeneous.y(), transformed_homogeneous.z());
+  }
+
+  /**
+   * Apply camera transformation matrix to a cv::Point3f
+   * @param point The input 3D point
+   * @return The transformed 3D point
+   */
+  cv::Point3f apply_camera_transformation(const cv::Point3f& point) {
+    Eigen::Vector3f eigen_point(point.x, point.y, point.z);
+    Eigen::Vector3f transformed = apply_camera_transformation(eigen_point);
+    return cv::Point3f(transformed.x(), transformed.y(), transformed.z());
+  }
+
+  #ifdef KINECT_AZURE_LIBS
+  k4a::image transform_color_to_depth_coordinates(k4a_transformation_t transformation_handle, 
+                                                  k4a::image color_image, 
+                                                  k4a::image depth_image) {
+    if (!depth_image.is_valid()) {
+      cout << "\033[1;33mWarning: No depth image available, skipping color-to-depth transformation\033[0m" << endl;
+      return color_image;
+    }
+    
+    if (!color_image.is_valid()) {
+      cout << "\033[1;31mError: Invalid color image provided for transformation\033[0m" << endl;
+      return color_image;
+    }
+    
+    // Check if the color image is compressed (JPEG) or raw (BGRA32)
+    k4a_image_format_t color_format = color_image.get_format();
+    
+    k4a::image color_image_for_transform;
+    
+    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      color_image_for_transform = color_image;
+    } else {
+      // Decompress the image to get raw BGRA32 data
+      size_t buffer_size = color_image.get_size();
+      uint8_t *compressed_buffer = color_image.get_buffer();
+      
+      // Create a temporary Mat from the compressed buffer
+      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image for transformation!\033[0m" << endl;
+        return color_image; // Use original as fallback
+      }
+      
+      // Convert BGR to BGRA
+      cv::Mat bgra_image;
+      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
+      
+      // Create a new k4a::image with the decompressed BGRA data
+      color_image_for_transform = k4a::image::create(
+        K4A_IMAGE_FORMAT_COLOR_BGRA32,
+        bgra_image.cols,
+        bgra_image.rows,
+        bgra_image.cols * 4 * sizeof(uint8_t)
+      );
+      
+      if (color_image_for_transform.is_valid()) {
+        // Copy the BGRA data to the k4a::image
+        uint8_t *k4a_buffer = color_image_for_transform.get_buffer();
+        memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
+      } else {
+        cout << "\033[1;33mWarning: Failed to create BGRA32 k4a::image, using original\033[0m" << endl;
+        return color_image;
+      }
+    }
+    
+    // Now proceed with the transformation using the BGRA32 image
+    if (color_image_for_transform.is_valid() && color_image_for_transform.get_format() == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      // Create a new k4a::image for the transformed color image
+      k4a::image transformed_color_image = k4a::image::create(
+        K4A_IMAGE_FORMAT_COLOR_BGRA32,
+        depth_image.get_width_pixels(),
+        depth_image.get_height_pixels(),
+        depth_image.get_width_pixels() * 4 * sizeof(uint8_t)
+      );
+      
+      if (transformed_color_image.is_valid()) {
+        // Transform color image to depth camera coordinates
+        k4a_result_t transform_result = k4a_transformation_color_image_to_depth_camera(
+          transformation_handle,
+          depth_image.handle(),
+          color_image_for_transform.handle(),
+          transformed_color_image.handle()
+        );
+        
+        if (transform_result == K4A_RESULT_SUCCEEDED) {
+          return transformed_color_image;
+        } else {
+          cout << "\033[1;33mWarning: Color to depth transformation failed, using original color image\033[0m" << endl;
+        }
+      } else {
+        cout << "\033[1;33mWarning: Failed to create transformed color image buffer\033[0m" << endl;
+      }
+    } else {
+      cout << "\033[1;33mWarning: Cannot transform - color image is not in BGRA32 format\033[0m" << endl;
+    }
+    
+    return color_image; // Return original if transformation failed
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type k4a_color_image_to_cv_mat(k4a::image k4a_image, cv::Mat& output_mat) {
+    
+    if (!k4a_image.is_valid()) {
+      cout << "\033[1;31mInvalid k4a::image provided\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    int rows = k4a_image.get_height_pixels();
+    int cols = k4a_image.get_width_pixels();
+    
+    // Check buffer size
+    size_t buffer_size = k4a_image.get_size();
+    uint8_t *buffer = k4a_image.get_buffer();
+    
+    // Calculate expected buffer size
+    size_t expected_size = rows * cols * 4; // 4 bytes per pixel for BGRA
+    
+    // Get the stride (bytes per row) from the image
+    size_t stride = k4a_image.get_stride_bytes();
+    
+    // Check image format
+    k4a_image_format_t format = k4a_image.get_format();
+    
+    if (stride == 0 || buffer_size < expected_size) {
+      // Handle compressed image
+      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image!\033[0m" << endl;
+        return return_type::error;
+      }
+
+      // Convert to BGR if necessary (OpenCV imdecode usually returns BGR)
+      if (decoded_image.channels() == 3) {
+        output_mat = decoded_image.clone();
+      } else {
+        cv::cvtColor(decoded_image, output_mat, cv::COLOR_BGRA2BGR);
+      }
+    } else {
+      // Handle raw BGRA data
+      try {
+        cv::Mat temp_mat = cv::Mat(rows, cols, CV_8UC4, (void *)buffer, stride);
+        cv::cvtColor(temp_mat, output_mat, cv::COLOR_BGRA2BGR);
+      } catch (const cv::Exception& e) {
+        cout << "\033[1;31mColor conversion failed: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      } catch (const std::exception& e) {
+        cout << "\033[1;31mException creating Mat: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      }
+    }
+    
+    // Final check if Mat was created successfully
+    if (output_mat.empty()) {
+      cout << "\033[1;31mFailed to create cv::Mat from k4a::image!\033[0m" << endl;
+      return return_type::error;
+    }  
+
+    return return_type::success;
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type k4a_depth_image_to_cv_mat(k4a::image k4a_depth_image, cv::Mat& output_mat) {
+    
+    if (!k4a_depth_image.is_valid()) {
+      cout << "\033[1;31mInvalid k4a depth image provided\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    int rows = k4a_depth_image.get_height_pixels();
+    int cols = k4a_depth_image.get_width_pixels();
+    
+    // Check buffer size
+    size_t buffer_size = k4a_depth_image.get_size();
+    uint8_t *buffer = k4a_depth_image.get_buffer();
+    
+    // Calculate expected buffer size for raw depth image (2 bytes per pixel)
+    size_t expected_raw_size = rows * cols * 2; // 2 bytes per pixel for 16-bit depth
+    
+    // Get the stride (bytes per row) from the image
+    size_t stride = k4a_depth_image.get_stride_bytes();
+    
+    // Check image format
+    k4a_image_format_t format = k4a_depth_image.get_format();
+    
+    if (format != K4A_IMAGE_FORMAT_DEPTH16) {
+      cout << "\033[1;31mUnsupported depth image format: " << format << "\033[0m" << endl;
+      return return_type::error;
+    }
+    
+    // Check if the depth image is compressed (from MKV file)
+    if (stride == 0 || buffer_size < expected_raw_size) {
+      // Try to decompress using OpenCV (some MKV files use standard compression)
+      vector<uint8_t> compressed_data(buffer, buffer + buffer_size);
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_ANYDEPTH | cv::IMREAD_ANYCOLOR);
+      
+      if (!decoded_image.empty()) {
+        // Convert to 16-bit if necessary
+        if (decoded_image.type() == CV_16U) {
+          output_mat = decoded_image.clone();
+        } else {
+          decoded_image.convertTo(output_mat, CV_16U);
+        }
+      } else {
+        cout << "\033[1;33mWarning: Failed to decode compressed depth data with OpenCV\033[0m" << endl;
+        cout << "\033[1;33mAssuming raw depth data despite size mismatch\033[0m" << endl;
+        
+        // Fallback: try to interpret as raw data anyway
+        if (stride == 0) {
+          stride = cols * 2; // Default stride for 16-bit depth
+        }
+        
+        try {
+          cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
+          output_mat = temp_mat.clone();
+        } catch (const cv::Exception& e) {
+          cout << "\033[1;31mFailed to create Mat from raw depth data: " << e.what() << "\033[0m" << endl;
+          return return_type::error;
+        }
+      }
+    } else {
+      // Handle raw depth data (16-bit unsigned integers)
+      
+      try {
+        if (stride == 0) {
+          stride = cols * 2; // Default stride for 16-bit depth
+        }
+        
+        // Create Mat from raw depth data
+        cv::Mat temp_mat = cv::Mat(rows, cols, CV_16U, (void *)buffer, stride);
+        
+        // Clone the data to ensure it's owned by output_mat
+        output_mat = temp_mat.clone();
+        
+      } catch (const cv::Exception& e) {
+        cout << "\033[1;31mDepth image conversion failed: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      } catch (const std::exception& e) {
+        cout << "\033[1;31mException creating depth Mat: " << e.what() << "\033[0m" << endl;
+        return return_type::error;
+      }
+    }
+    
+    // Final check if Mat was created successfully
+    if (output_mat.empty()) {
+      cout << "\033[1;31mFailed to create cv::Mat from k4a depth image!\033[0m" << endl;
+      return return_type::error;
+    }
+
+    return return_type::success;
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  void mask_depth_with_body_index(const k4a::image &depth_image,
+                                  const k4a::image &body_index_map,
+                                  k4a::image &masked_depth_image) {
+    // Get image dimensions
+    int width = depth_image.get_width_pixels();
+    int height = depth_image.get_height_pixels();
+
+    // Get pointers to the image data
+    const uint16_t *depth_data =
+        reinterpret_cast<const uint16_t *>(depth_image.get_buffer());
+    const uint8_t *body_index_data =
+        reinterpret_cast<const uint8_t *>(body_index_map.get_buffer());
+    uint16_t *masked_depth_data =
+        reinterpret_cast<uint16_t *>(masked_depth_image.get_buffer());
+
+    // Iterate over each pixel
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int idx = y * width + x;
+
+        // Check if the pixel belongs to a body
+        if (body_index_data[idx] != K4ABT_BODY_INDEX_MAP_BACKGROUND) {
+          // Copy the depth value
+          masked_depth_data[idx] = depth_data[idx];
+        } else {
+          // Set to zero or any background value (e.g., 0 for no depth)
+          masked_depth_data[idx] = 0;
+        }
+      }
+    }
+  }
+  #endif
+
+  #ifdef KINECT_AZURE_LIBS
+  return_type create_point_cloud(k4a_transformation_t transformation_handle,
+                                   const k4a_image_t depth_image,
+                                   const k4a_image_t color_image) {
+    // Check if the color image is compressed (JPEG) or raw (BGRA32)
+    k4a_image_format_t color_format = k4a_image_get_format(color_image);
+    
+    k4a_image_t color_image_for_transform = NULL;
+    
+    if (color_format == K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      // Use the original image directly
+      color_image_for_transform = const_cast<k4a_image_t>(color_image);
+      k4a_image_reference(color_image_for_transform);
+    } else {
+      // Decompress the image to get raw BGRA32 data
+      size_t buffer_size = k4a_image_get_size(color_image);
+      uint8_t *compressed_buffer = k4a_image_get_buffer(color_image);
+      
+      // Create a temporary Mat from the compressed buffer
+      vector<uint8_t> compressed_data(compressed_buffer, compressed_buffer + buffer_size);
+      
+      // Decode the compressed image
+      cv::Mat decoded_image = cv::imdecode(compressed_data, cv::IMREAD_COLOR);
+      
+      if (decoded_image.empty()) {
+        cout << "\033[1;31mFailed to decode compressed image for point cloud!\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      // Convert BGR to BGRA
+      cv::Mat bgra_image;
+      cv::cvtColor(decoded_image, bgra_image, cv::COLOR_BGR2BGRA);
+      
+      // Create a new k4a_image_t with the decompressed BGRA data
+      if (K4A_RESULT_SUCCEEDED != k4a_image_create(
+          K4A_IMAGE_FORMAT_COLOR_BGRA32,
+          bgra_image.cols,
+          bgra_image.rows,
+          bgra_image.cols * 4 * sizeof(uint8_t),
+          &color_image_for_transform)) {
+        cout << "\033[1;31mFailed to create BGRA32 k4a_image_t for point cloud\033[0m" << endl;
+        return return_type::error;
+      }
+      
+      // Copy the BGRA data to the k4a_image_t
+      uint8_t *k4a_buffer = k4a_image_get_buffer(color_image_for_transform);
+      memcpy(k4a_buffer, bgra_image.data, bgra_image.total() * bgra_image.elemSize());
+    }
+    
+    int depth_image_width_pixels = k4a_image_get_width_pixels(depth_image);
+    int depth_image_height_pixels = k4a_image_get_height_pixels(depth_image);
+    k4a_image_t transformed_color_image = NULL;
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_image_create(K4A_IMAGE_FORMAT_COLOR_BGRA32,
+                          depth_image_width_pixels, depth_image_height_pixels,
+                          depth_image_width_pixels * 4 * (int)sizeof(uint8_t),
+                          &transformed_color_image)) {
+      printf("Failed to create transformed color image\n");
+      return return_type::error;
+    }
+
+    k4a_image_t point_cloud_image = NULL;
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_image_create(K4A_IMAGE_FORMAT_CUSTOM, depth_image_width_pixels,
+                          depth_image_height_pixels,
+                          depth_image_width_pixels * 3 * (int)sizeof(int16_t),
+                          &point_cloud_image)) {
+      printf("Failed to create point cloud image\n");
+      return return_type::error;
+    }
+
+    if (K4A_RESULT_SUCCEEDED !=
+        k4a_transformation_color_image_to_depth_camera(
+            transformation_handle, depth_image, color_image_for_transform,
+            transformed_color_image)) {
+      printf("Failed to compute transformed color image\n");
+      // Clean up the color image if it was created
+      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+        k4a_image_release(color_image_for_transform);
+      }
+      return return_type::error;
+    }
+
+    if (K4A_RESULT_SUCCEEDED != k4a_transformation_depth_image_to_point_cloud(
+                                    transformation_handle, depth_image,
+                                    K4A_CALIBRATION_TYPE_DEPTH,
+                                    point_cloud_image)) {
+      printf("Failed to compute point cloud\n");
+      // Clean up the color image if it was created
+      if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+        k4a_image_release(color_image_for_transform);
+      }
+      return return_type::error;
+    }
+
+    std::vector<color_point_t> points;
+
+    int width = k4a_image_get_width_pixels(point_cloud_image);
+    int height = k4a_image_get_height_pixels(transformed_color_image);
+
+    int16_t *point_cloud_image_data =
+        (int16_t *)(void *)k4a_image_get_buffer(point_cloud_image);
+    uint8_t *color_image_data = k4a_image_get_buffer(transformed_color_image);
+
+    for (int i = 0; i < width * height; i++) {
+      color_point_t point;
+      point.xyz[0] = point_cloud_image_data[3 * i + 0];
+      point.xyz[1] = point_cloud_image_data[3 * i + 1];
+      point.xyz[2] = point_cloud_image_data[3 * i + 2];
+      if (point.xyz[2] == 0) {
+        continue;
+      }
+
+      point.rgb[0] = color_image_data[4 * i + 0];
+      point.rgb[1] = color_image_data[4 * i + 1];
+      point.rgb[2] = color_image_data[4 * i + 2];
+      uint8_t alpha = color_image_data[4 * i + 3];
+
+      if (point.rgb[0] == 0 && point.rgb[1] == 0 && point.rgb[2] == 0 &&
+          alpha == 0) {
+        continue;
+      }
+
+      points.push_back(point);
+    }
+
+    // convert the points to a point cloud of Mat type
+    _point_cloud = cv::Mat(points.size(), 6, CV_32F);
+    for (size_t i = 0; i < points.size(); i++) {
+      _point_cloud.at<float>(i, 0) = points[i].xyz[0];
+      _point_cloud.at<float>(i, 1) = points[i].xyz[1];
+      _point_cloud.at<float>(i, 2) = points[i].xyz[2];
+      _point_cloud.at<float>(i, 3) = points[i].rgb[2];
+      _point_cloud.at<float>(i, 4) = points[i].rgb[1];
+      _point_cloud.at<float>(i, 5) = points[i].rgb[0];
+    }
+
+    // Save the point cloud to a ply file
+    // write_ply_from_points_vector(points,
+    // "../plugin_skeletonizer_3D/test_points.ply");
+    // write_ply_from_cv_mat(_point_cloud,
+    // "../plugin_skeletonizer_3D/test_cv_mat.ply");
+
+    // Clean up the color image if it was created for decompression
+    if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+      k4a_image_release(color_image_for_transform);
+    }
+
+    return return_type::success;
+  }
+  #endif
+
+  void write_ply_from_cv_mat(cv::Mat point_cloud, const char *file_name) {
+    #define PLY_START_HEADER "ply"
+    #define PLY_END_HEADER "end_header"
+    #define PLY_ASCII "format ascii 1.0"
+    #define PLY_ELEMENT_VERTEX "element vertex"
+
+    // save to the ply file
+    std::ofstream ofs(file_name); // text mode first
+    ofs << PLY_START_HEADER << std::endl;
+    ofs << PLY_ASCII << std::endl;
+    ofs << PLY_ELEMENT_VERTEX << " " << point_cloud.rows << std::endl;
+    ofs << "property float x" << std::endl;
+    ofs << "property float y" << std::endl;
+    ofs << "property float z" << std::endl;
+    ofs << "property uchar red" << std::endl;
+    ofs << "property uchar green" << std::endl;
+    ofs << "property uchar blue" << std::endl;
+    ofs << PLY_END_HEADER << std::endl;
+    ofs.close();
+
+    std::stringstream ss;
+    for (int i = 0; i < point_cloud.rows; ++i) {
+      ss << point_cloud.at<float>(i, 0) << " " << point_cloud.at<float>(i, 1)
+          << " " << point_cloud.at<float>(i, 2);
+      ss << " " << point_cloud.at<float>(i, 3) << " "
+          << point_cloud.at<float>(i, 4) << " " << point_cloud.at<float>(i, 5);
+      ss << std::endl;
+    }
+    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
+    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
+  }
+
+  static void write_ply_from_points_vector(std::vector<color_point_t> points,
+                                             const char *file_name) {
+
+    #define PLY_START_HEADER "ply"
+    #define PLY_END_HEADER "end_header"
+    #define PLY_ASCII "format ascii 1.0"
+    #define PLY_ELEMENT_VERTEX "element vertex"
+
+    // save to the ply file
+    std::ofstream ofs(file_name); // text mode first
+    ofs << PLY_START_HEADER << std::endl;
+    ofs << PLY_ASCII << std::endl;
+    ofs << PLY_ELEMENT_VERTEX << " " << points.size() << std::endl;
+    ofs << "property float x" << std::endl;
+    ofs << "property float y" << std::endl;
+    ofs << "property float z" << std::endl;
+    ofs << "property uchar red" << std::endl;
+    ofs << "property uchar green" << std::endl;
+    ofs << "property uchar blue" << std::endl;
+    ofs << PLY_END_HEADER << std::endl;
+    ofs.close();
+
+    std::stringstream ss;
+    for (size_t i = 0; i < points.size(); ++i) {
+      // image data is BGR
+      ss << (float)points[i].xyz[0] << " " << (float)points[i].xyz[1] << " "
+          << (float)points[i].xyz[2];
+      ss << " " << (float)points[i].rgb[2] << " " << (float)points[i].rgb[1]
+          << " " << (float)points[i].rgb[0];
+      ss << std::endl;
+    }
+    std::ofstream ofs_text(file_name, std::ios::out | std::ios::app);
+    ofs_text.write(ss.str().c_str(), (std::streamsize)ss.str().length());
   }
 
   /**
@@ -2496,6 +2579,10 @@ public:
       return return_type::error;
     }
 
+    if (coordinate_transform(_params["debug"]["coordinate_transform"]) == return_type::error) {
+      return return_type::error;
+    }
+
     if (viewer(_params["debug"]["viewer"]) == return_type::error) {
       return return_type::error;
     }
@@ -2589,6 +2676,11 @@ public:
       return;
     }
 
+    if (setup_camera_extrinsics(_params["debug"]["coordinate_transfrom"]) == return_type::error) {
+      cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
+      return;
+    }
+
     setup_OpenPoseModel();
     setup_Pipeline();
   } 
@@ -2650,10 +2742,11 @@ protected:
   k4a_playback_t _kinect_mkv_playback_handle; /**< the Kinect Azure MKV playback handle */
   #endif
 
-  float _cx;
-  float _cy;
-  float _fx;
-  float _fy;
+  float _cx; /**< the camera principal point x coordinate */
+  float _cy; /**< the camera principal point y coordinate */
+  float _fx; /**< the camera focal length x coordinate */
+  float _fy; /**< the camera focal length y coordinate */
+  Eigen::Matrix4f _camera_transformation_matrix; /**< the camera transformation matrix for coordinate system transformation */
 
   string _resolution_rgb = ""; /**< the resolution of the RGB frame in the format "widthxheight" */
   int _rgb_height; /**< the height of the RGB frame */
