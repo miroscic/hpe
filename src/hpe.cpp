@@ -1089,9 +1089,9 @@ public:
       float Tz = camera_params.contains("Tz") ? camera_params["Tz"].get<float>() : 0.0f;
       
       // Build the 4x4 transformation matrix
-      // [R11 R12 R13 Tx]
-      // [R21 R22 R23 Ty]
-      // [R31 R32 R33 Tz]
+      // [Rxx Rxy Rxz Tx]
+      // [Ryx Ryy Ryz Ty]
+      // [Rzx Rzy Rzz Tz]
       // [ 0   0   0   1]
       _camera_transformation_matrix << Rxx, Rxy, Rxz, Tx,
                                       Ryx, Ryy, Ryz, Ty,
@@ -1129,14 +1129,20 @@ public:
   }
 
   /**
-   * Apply camera transformation matrix to a cv::Point3f
-   * @param point The input 3D point
-   * @return The transformed 3D point
+   * Apply camera transformation matrix to a 3D point represented as vector<float>
+   * @param point The input 3D point as {x,y,z}
+   * @return The transformed 3D point as {x,y,z}
    */
-  cv::Point3f apply_camera_transformation(const cv::Point3f& point) {
-    Eigen::Vector3f eigen_point(point.x, point.y, point.z);
+  std::vector<float> apply_camera_transformation(const std::vector<float> point) {
+    if (point.size() < 3) {
+      // Not enough components, return empty vector
+      return std::vector<float>();
+    }
+    Eigen::Vector3f eigen_point(static_cast<float>(point[0]),
+                                static_cast<float>(point[1]),
+                                static_cast<float>(point[2]));
     Eigen::Vector3f transformed = apply_camera_transformation(eigen_point);
-    return cv::Point3f(transformed.x(), transformed.y(), transformed.z());
+    return std::vector<float>{transformed.x(), transformed.y(), transformed.z()};
   }
 
   #ifdef KINECT_AZURE_LIBS
@@ -2064,9 +2070,37 @@ public:
    * @return return_type
    */
   return_type coordinate_transform(bool debug = false) {
-    
+
+    if (debug) {
+      cout << "\033[1;34mApplying camera coordinate transformation...\033[0m" << endl;
+    }
+
+    // Transform each keypoint in the 3D skeleton
+    for (auto& [joint_name, joint_3d] : _skeleton3D) {
+      if (joint_3d.size() >= 3) {
+        // Apply the camera transformation matrix
+        vector<float> joint_3d_transformed = apply_camera_transformation(joint_3d);
+        _skeleton3D[joint_name] = joint_3d_transformed;
+      }
+    }
+
+    if (debug) {
+      cout << "\nTransformed Skeleton 3D:" << endl;
+      for (const auto &[keypoint_name, keypoint_data] : _skeleton3D) {
+        cout << keypoint_name << ": (";
+        for (size_t i = 0; i < keypoint_data.size(); ++i) {
+          cout << static_cast<int>(keypoint_data[i]);
+          if (i < keypoint_data.size() - 1) {
+            cout << ", ";
+          }
+        }
+        cout << ")" << endl;
+      }
+    }
+
     return return_type::success;
   }
+  
 
   /**
    * @brief Compute the skeleton from RGB images only
@@ -2676,7 +2710,7 @@ public:
       return;
     }
 
-    if (setup_camera_extrinsics(_params["debug"]["coordinate_transfrom"]) == return_type::error) {
+    if (setup_camera_extrinsics(_params["debug"]["coordinate_transform"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
       return;
     }
