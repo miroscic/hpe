@@ -363,8 +363,8 @@ public:
   bool is_raspi_rgb_camera_connected() {
     // Check if a Raspberry Pi RGB camera is connected
     #ifdef __linux
-      _raspi_rgb_camera.options->video_width = rgb_width_read;   // 1280;
-      _raspi_rgb_camera.options->video_height = rgb_height_read; // 720;
+      _raspi_rgb_camera.options->video_width = _rgb_width_read;   // 1280;
+      _raspi_rgb_camera.options->video_height = _rgb_height_read; // 720;
       _raspi_rgb_camera.options->framerate = 25;
       _raspi_rgb_camera.options->verbose = false;
       if(_raspi_rgb_camera.startVideo())
@@ -526,12 +526,10 @@ public:
   return_type setup_video_capture(bool debug = false) {
 
     size_t found = _resolution_rgb.find("x");
-    int rgb_width_read = 1280;
-    int rgb_height_read = 720;
 
     if (found != string::npos) {
-      rgb_width_read = stoi(_resolution_rgb.substr(0, found));
-      rgb_height_read = stoi(_resolution_rgb.substr(found + 1, _resolution_rgb.length()));
+      _rgb_width_read = stoi(_resolution_rgb.substr(0, found));
+      _rgb_height_read = stoi(_resolution_rgb.substr(found + 1, _resolution_rgb.length()));
     }
 
     if (_video_source == KINECT_AZURE_CAMERA) {
@@ -689,11 +687,32 @@ public:
 
       #endif
     }
-    else if (_video_source == RGB_CAMERA){
-
+    else if (_video_source == RGB_CAMERA)
+    {
+      // setup video capture
+      _cap.open(_camera_device);
+      if (!_cap.isOpened())
+      {
+        throw invalid_argument("ERROR: Cannot open the video camera");
+      }
+      _cap >> _rgb;
     }
-    else if (_video_source == RASPI_RGB_CAMERA){
+    else if (_video_source == RASPI_RGB_CAMERA)
+    {
+      std::cout << "It is running on a Raspi" << std::endl;
+      // _camera.options->video_width = rgb_width_read;   // 1280;
+      // _camera.options->video_height = rgb_height_read; // 720;
+      // _camera.options->framerate = 25;
+      // _camera.options->verbose = false;
+      _raspi_rgb_camera.startVideo();
 
+      do
+      {
+        if (!_raspi_rgb_camera.getVideoFrame(_rgb, 100))
+        {
+          std::cout << "Waiting for video frame..." << std::endl;
+        }
+      } while (_rgb.empty());
     }
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
@@ -1039,7 +1058,7 @@ public:
     //is in the coordinates of the depth image and MUST stay that way
     if (_video_source != KINECT_AZURE_DUMMY && _video_source != KINECT_AZURE_CAMERA){
       if(found != string::npos){
-        resolution = cv::Size(rgb_width_read, rgb_height_read);
+        resolution = cv::Size(_rgb_width_read, _rgb_height_read);
 
         _output_transform = OutputTransform(_rgb.size(), resolution);
         resolution = _output_transform.computeResolution();
@@ -2597,7 +2616,7 @@ public:
       return return_type::error;
     }
     
-    if (point_cloud_filter(_params["debug"]["point_cloud_filter"], _params.contains("filter_point_cloud") ? _params["filter_point_cloud"] : true) == return_type::error) {
+    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
       return return_type::error;
     }
 
@@ -2696,9 +2715,16 @@ public:
       _resolution_rgb = _params["resolution_rgb"];
     }
 
+    if (_params.contains("camera_device")) {
+      _camera_device = _params["camera_device"];
+    }
+
+    if (_params.contains("fps")) {
+      _fps = _params["fps"];
+    }
+
     set_video_source(_params["dummy"]);
     cout << "\033[1;32mVideo source: " << video_source_to_string(_video_source) << "\033[0m" << endl;
-
     if (_params.contains("model_file")) {
       _model_file = _params["model_file"];
     } else {
@@ -2732,7 +2758,9 @@ protected:
   string _agent_id; /**< the agent ID */
   string _model_file; /**< the model file path */
   chrono::steady_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
-
+  int _camera_device = 0;
+  data_t _fps = 25;
+  
   Mat _rgbd;          /**< the last RGBD frame */
   Mat _rgb;           /**< the last RGB frame */
   Mat _rgbd_filtered; /**< the last RGBD frame filtered with the body index mask*/
@@ -2786,6 +2814,8 @@ protected:
   int _rgb_height; /**< the height of the RGB frame */
   int _rgb_width; /**< the width of the RGB frame */
   VideoCapture _cap; /**< the OpenCV video capture object */
+  int _rgb_width_read = 1280;
+  int _rgb_height_read = 720;
 
   vector<cv::Point2i> _keypoints_list_openpose; /**< the 2D keypoints list for OpenPose */
   vector<cv::Point3f> _keypoints_cov_openpose; /**< the 2D covariance for OpenPose keypoints */

@@ -16,9 +16,9 @@ project(hpe VERSION 1.3.1 LANGUAGES C CXX)
 if(CMAKE_BUILD_TYPE STREQUAL "")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
 endif()
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "C:/Program Files/MADS/usr/local/bin" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
-endif()
+# if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+#   set(CMAKE_INSTALL_PREFIX "C:/Program Files/MADS/usr/local/bin" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
+# endif()
 message(STATUS "CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
 message(STATUS "CMAKE_INSTALL_PREFIX: ${CMAKE_INSTALL_PREFIX}")
 set(PLUGIN_SUFFIX "" CACHE STRING "Suffix for the plugin file, identifying the architecture, e.g. arm64, x86_64, etc.")
@@ -62,6 +62,7 @@ else()
     PATHS /opt/intel/openvino_2024.4.0/runtime/include
     PATHS /opt/intel/openvino_2024.6.0/runtime/include
     PATHS /opt/intel/openvino_2025.2.0/runtime/include
+    PATHS /opt/intel/openvino_2024.2.0/runtime/include
     PATH_SUFFIXES openvino
   )
   cmake_path(GET OPENVINO_INCLUDE_DIR PARENT_PATH OPENVINO_INCLUDE_DIR)
