@@ -1729,7 +1729,7 @@ public:
     }
     else if (_video_source == RASPI_RGB_CAMERA){
       #ifdef __linux
-      _raspi_camera_rgb.getVideoFrame(_rgb, 100);
+      _raspi_rgb_camera.getVideoFrame(_rgb, 100);
       #endif
     }
     else if (_video_source == KINECT_AZURE_DUMMY) {
@@ -2190,7 +2190,6 @@ public:
       }
 
       if (debug) {
-        cout << "Rendering human pose for debugging..." << endl;
         try {
           renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
         } catch (const std::exception& e) {
@@ -2538,8 +2537,6 @@ public:
   return_type viewer(bool debug = false) {
 
     if (debug) {
-      cout << "Launching viewer..." << endl;
-
       if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
 
         // Show _rgb and _rgbd images in two separate windows contempouraneously
