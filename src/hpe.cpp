@@ -704,6 +704,7 @@ public:
       // _camera.options->video_height = rgb_height_read; // 720;
       // _camera.options->framerate = 25;
       // _camera.options->verbose = false;
+      #ifdef __linux
       _raspi_rgb_camera.startVideo();
 
       do
@@ -713,6 +714,7 @@ public:
           std::cout << "Waiting for video frame..." << std::endl;
         }
       } while (_rgb.empty());
+      #endif
     }
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
@@ -1723,10 +1725,12 @@ public:
       #endif
     }
     else if (_video_source == RGB_CAMERA){
-
+      _cap >> _rgb;
     }
     else if (_video_source == RASPI_RGB_CAMERA){
-
+      #ifdef __linux
+      _raspi_camera_rgb.getVideoFrame(_rgb, 100);
+      #endif
     }
     else if (_video_source == KINECT_AZURE_DUMMY) {
       #ifdef KINECT_AZURE_LIBS
@@ -2539,8 +2543,8 @@ public:
       if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
 
         // Show _rgb and _rgbd images in two separate windows contempouraneously
-        cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
-        cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+        //cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+        //cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
 
         cv::imshow("RGB Frame", _rgb);
 
@@ -2573,7 +2577,7 @@ public:
               _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
 
         // Show _rgb image in a window
-        cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+        //cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
         cv::imshow("RGB Frame", _rgb);
 
         // Wait for a key press for 30 milliseconds
@@ -2743,6 +2747,11 @@ public:
 
     setup_OpenPoseModel();
     setup_Pipeline();
+
+    // Show _rgb and _rgbd images in two separate windows contempouraneously
+    cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+    cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+
   } 
 
   // Implement this method if you want to provide additional information
