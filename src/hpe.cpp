@@ -2843,6 +2843,7 @@ public:
   // Implement the actual functionality here
   return_type get_output(json &out, std::vector<unsigned char> *blob = nullptr) override {
 
+    
     out.clear();
 
     auto start_get_output = std::chrono::high_resolution_clock::now();
@@ -3058,8 +3059,10 @@ public:
     setup_Pipeline();
 
     // Show _rgb and _rgbd images in two separate windows contempouraneously
-    cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
-    cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+    if (_params["debug"]["viewer"]) {
+      cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+      cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+    }
 
   } 
 
