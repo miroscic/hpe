@@ -1078,7 +1078,7 @@ public:
 
   /* Setup camera extrinsics from parameters
   */
-  return_type setup_camera_extrinsics(bool debug = false) {
+  return_type setup_camera_extrinsics(bool calibration = false, bool debug = false) {
     // Setup camera extrinsics if provided in parameters
     
     // Initialize transformation matrix as identity
@@ -1090,7 +1090,7 @@ public:
     }
     
     // Check if transformation parameters exist for this camera serial
-    if (_params.contains("SN" + _agent_id)) {
+    if (!calibration && _params.contains("SN" + _agent_id)) {
       auto camera_params = _params["SN" + _agent_id];
       
       // Read rotation matrix components
@@ -1124,9 +1124,12 @@ public:
         cout << _camera_transformation_matrix << endl;
       }
     } else {
-      if (debug) {
-        cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
-      }
+
+        if (calibration)
+          cout << "\033[1;33mCalibration mode active, using the identity matrix\033[0m" << endl;
+        else
+          cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
+
       return return_type::warning;
     }
 
@@ -1164,6 +1167,18 @@ public:
                                 static_cast<float>(point[2]));
     Eigen::Vector3f transformed = apply_camera_transformation(eigen_point);
     return std::vector<float>{transformed.x(), transformed.y(), transformed.z()};
+  }
+
+  /**
+   * Apply camera transformation matrix to a 3D matrix
+   * @param matrix The input 3D matrix
+   * @return The transformed 3D matrix
+   */
+  Eigen::Matrix3f apply_camera_transformation(const Eigen::Matrix3f& matrix) {
+
+    // Apply transformation matrix
+    Eigen::Matrix3f transformed = _camera_transformation_matrix.block<3, 3>(0, 0).transpose() * matrix * _camera_transformation_matrix.block<3, 3>(0, 0);
+    return transformed;
   }
 
   #ifdef KINECT_AZURE_LIBS
@@ -2107,6 +2122,15 @@ public:
       }
     }
 
+    // Transform each keypoint in the 3D skeleton
+    for (auto& [joint_name, cov_3d] : _cov3D) {
+      if (cov_3d.size() >= 3) {
+        // Apply the camera transformation matrix
+        Eigen::Matrix3f cov_3d_transformed = apply_camera_transformation(cov_3d);
+        _cov3D[joint_name] = cov_3d_transformed;
+      }
+    }
+
     if (debug) {
       cout << "\nTransformed Skeleton 3D:" << endl;
       for (const auto &[keypoint_name, keypoint_data] : _skeleton3D) {
@@ -2952,7 +2976,7 @@ public:
       return;
     }
 
-    if (setup_camera_extrinsics(_params["debug"]["coordinate_transform"]) == return_type::error) {
+    if (setup_camera_extrinsics(_params["calibration"],_params["debug"]["coordinate_transform"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
       return;
     }
