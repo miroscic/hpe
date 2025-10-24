@@ -1906,11 +1906,13 @@ public:
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
+      /*
       if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
         // It should never hit timeout when K4A_WAIT_INFINITE is set.
         cout << "Error! Add capture to tracker process queue timeout!" << endl;
         return return_type::error;
       } 
+      */
 
       _body_frame = _kinect_tracker.pop_result();
       
@@ -2008,7 +2010,7 @@ public:
         if (masked_depth_image != NULL) {
           // get raw buffer
           uint8_t *buffer = masked_depth_image.get_buffer();
-          cout << "Depth image buffer:" << buffer << endl;
+          //cout << "Depth image buffer:" << buffer << endl;
 
           // convert the raw buffer to cv::Mat
           int rows = masked_depth_image.get_height_pixels();
@@ -2843,6 +2845,10 @@ public:
 
     out.clear();
 
+    auto start_get_output = std::chrono::high_resolution_clock::now();
+
+    auto time_prev = std::chrono::high_resolution_clock::now();
+
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
 
     if (acquire_frame(_params["debug"]["acquire_frame"]) == return_type::error) {
@@ -2852,34 +2858,87 @@ public:
     // Update frame timestamp after acquiring frame
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
-    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
+    auto time_now = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Acquire frame: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
+    #ifdef KINECT_AZURE_LIBS
+    if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
+      // It should never hit timeout when K4A_WAIT_INFINITE is set.
+      cout << "Error! Add capture to tracker process queue timeout!" << endl;
       return return_type::error;
-    }
-    
-    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
-      return return_type::error;
-    }
+    } 
+    #endif
+
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Skeleton call: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
 
     if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
       return return_type::error;
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Skeleton rgb: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
     if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
       return return_type::error;
     }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Hessian compute: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
 
     if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
       return return_type::error;
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Cov compute: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
+    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Skeleton depth: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
+    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
+      return return_type::error;
+    }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Point cloud filter: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
     if (coordinate_transform(_params["debug"]["coordinate_transform"]) == return_type::error) {
       return return_type::error;
     }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Coordinate transform: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
 
     if (viewer(_params["debug"]["viewer"]) == return_type::error) {
       return return_type::error;
     }
     
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Viewer: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
 
     // Prepare output 
     // the json definition is on the google doc: https://docs.google.com/document/d/1IRs9VA9gGh8CmGIK8cRInYrMCY8cF8FMGC5H8DoonJI
@@ -2937,12 +2996,26 @@ public:
       }
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Output prepare: " << duration.count() << " microseconds" << endl;
+    time_prev = time_now;
+
+
     // clear the fields for the next frame
     _skeleton2D.clear();
     _skeleton3D.clear(); 
     _cov3D.clear();
     _cov2D_vec.clear();
     _cov3D_vec.clear();
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
+    std::cout << "Output clear: " << duration.count() << " microseconds" << endl;
+
+    auto stop_get_output = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop_get_output - start_get_output);
+    std::cout << "GET OUTPUT TIME: " << duration.count() << " microseconds" << endl;
 
     return return_type::success;
   }
