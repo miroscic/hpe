@@ -2191,7 +2191,7 @@ public:
 
       if (debug) {
         try {
-          renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
+          _rgb = renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
         } catch (const std::exception& e) {
           cout << "\033[1;33mWarning: Failed to render pose: " << e.what() << "\033[0m" << endl;
         }
@@ -2508,17 +2508,232 @@ public:
 
       return return_type::success;
     }
-    else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
-             _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+    
+    else if (_video_source == RASPI_RGB_CAMERA || _video_source == RASPI_RGB_CAMERA_DUMMY) {
 
-              
+      // RASPI Intrinsic parameters
+      float f_mm =
+          6; // focal length in mm
+             // https://grobotronics.com/raspberry-pi-hq-camera-lens-6mm-wide-angle.html?sl=en
+      // Sensor dimensions:
+      float d_x = (4056 * 1.55) /
+                  1000; // https://www.waveshare.com/wiki/Raspberry_Pi_HQ_Camera
+      float d_y = (3040 * 1.55) / 1000;
+
+      int H = _rgb.rows; // image size after resize
+      int W = _rgb.cols;
+
+      _fx = (f_mm * W) / d_x; // focal length in pixel
+      _fy = (f_mm * H) / d_y; // focal length in pixel
+
+      _cx = W / 2; // coordinate of the principal point
+      _cy = H / 2;
+
+      float Hp =
+          500; // Real "height" of the selected person in mm between nec and hip
+      float sigmaHp = 2; // mm
+
+      if (_keypoints_list_openpose.size() > 0) { // at least one person
+        if (((_keypoints_list_openpose[2].y > 0) || (_keypoints_list_openpose[5].y > 0)) &&
+            ((_keypoints_list_openpose[8].y > 0) ||
+             (_keypoints_list_openpose[11].y >
+              0))) { // 2 = SHOR      5 = SHOL     8 = HIPR       11 = HIPL
+
+          float v_sho_tmp;
+          float v_sho;
+          Eigen::Matrix2f cov2D_SHO;
+          if (_keypoints_list_openpose[2].y > 0 && _keypoints_list_openpose[5].y > 0) {
+            v_sho_tmp =
+                fabs(_keypoints_list_openpose[2].y - _keypoints_list_openpose[5].y) / 2.0f;
+            if (_keypoints_list_openpose[2].y < _keypoints_list_openpose[5].y) {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[2].y;
+            } else {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[5].y;
+            }
+            cov2D_SHO = (_cov2D_vec[2] + _cov2D_vec[5]) / 2.0;
+          } else if (_keypoints_list_openpose[2].y > 0) {
+            v_sho = _keypoints_list_openpose[2].y;
+            cov2D_SHO = _cov2D_vec[2];
+          } else {
+            v_sho = _keypoints_list_openpose[5].y;
+            cov2D_SHO = _cov2D_vec[5];
+          }
+          float variance_shoY = cov2D_SHO(1, 1);
+
+          float v_hip_tmp;
+          float v_hip;
+          Eigen::Matrix2f cov2D_HIP;
+          if (_keypoints_list_openpose[8].y > 0 && _keypoints_list_openpose[11].y > 0) {
+            v_hip_tmp =
+                fabs(_keypoints_list_openpose[8].y - _keypoints_list_openpose[11].y) / 2.0f;
+            if (_keypoints_list_openpose[8].y < _keypoints_list_openpose[11].y) {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[8].y;
+            } else {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[11].y;
+            }
+            cov2D_HIP = (_cov2D_vec[11] + _cov2D_vec[8]) / 2.0;
+          } else if (_keypoints_list_openpose[8].y > 0) {
+            v_hip = _keypoints_list_openpose[8].y;
+            cov2D_HIP = _cov2D_vec[8];
+          } else {
+            v_hip = _keypoints_list_openpose[11].y;
+            cov2D_HIP = _cov2D_vec[11];
+          }
+          float variance_hipY = cov2D_HIP(1, 1);
+
+          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+
+          // cout << "Z---------->    " << Z << endl;
+
+          for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
+            Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
+            if (!(cov2D_TMP.array() == -1).all()) {
+              Eigen::Matrix<float, 3, 2> J;
+              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+
+              float variance_z_Hp =
+                  pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
+              float variance_z_sho =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_shoY;
+              float variance_z_hip =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_hipY;
+              float variance_z =
+                  variance_z_Hp + variance_z_sho + variance_z_hip;
+
+              Eigen::Matrix3f covMatrixZ;
+              covMatrixZ << 0, 0, 0, 0, 0, 0, 0, 0, variance_z;
+
+              Eigen::Matrix3f covMatrix3D =
+                  J * cov2D_TMP * J.transpose() + covMatrixZ;
+              _cov3D_vec.push_back(covMatrix3D);
+              _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
+            } else {
+              Eigen::Matrix3f covMatrixZ_NaN;
+              covMatrixZ_NaN.setConstant(-1);
+              _cov3D_vec.push_back(covMatrixZ_NaN);
+              _cov3D[keypoints_map_openpose[i]] = covMatrixZ_NaN; // store the 3D covariance matrix in the map
+            }
+          }
+        }
+      }
       
       return return_type::success;
-    } else {
+    }
+
+    else if (_video_source == RGB_CAMERA || _video_source == RGB_CAMERA_DUMMY){
+
+      // RGB Camera Intrinsic parameters
+      // TODO: Calibrate RGB Camera and take intrinsic param from INI
+      float f_mm =
+          6; // focal length in mm
+             // https://grobotronics.com/raspberry-pi-hq-camera-lens-6mm-wide-angle.html?sl=en
+      // Sensor dimensions:
+      float d_x = (4056 * 1.55) /
+                  1000; // https://www.waveshare.com/wiki/Raspberry_Pi_HQ_Camera
+      float d_y = (3040 * 1.55) / 1000;
+
+      int H = _rgb.rows; // image size after resize
+      int W = _rgb.cols;
+
+      _fx = (f_mm * W) / d_x; // focal length in pixel
+      _fy = (f_mm * H) / d_y; // focal length in pixel
+
+      _cx = W / 2; // coordinate of the principal point
+      _cy = H / 2;
+
+      float Hp =
+          500; // Real "height" of the selected person in mm between nec and hip
+      float sigmaHp = 2; // mm
+
+      if (_keypoints_list_openpose.size() > 0) { // at least one person
+        if (((_keypoints_list_openpose[2].y > 0) || (_keypoints_list_openpose[5].y > 0)) &&
+            ((_keypoints_list_openpose[8].y > 0) ||
+             (_keypoints_list_openpose[11].y >
+              0))) { // 2 = SHOR      5 = SHOL     8 = HIPR       11 = HIPL
+
+          float v_sho_tmp;
+          float v_sho;
+          Eigen::Matrix2f cov2D_SHO;
+          if (_keypoints_list_openpose[2].y > 0 && _keypoints_list_openpose[5].y > 0) {
+            v_sho_tmp =
+                fabs(_keypoints_list_openpose[2].y - _keypoints_list_openpose[5].y) / 2.0f;
+            if (_keypoints_list_openpose[2].y < _keypoints_list_openpose[5].y) {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[2].y;
+            } else {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[5].y;
+            }
+            cov2D_SHO = (_cov2D_vec[2] + _cov2D_vec[5]) / 2.0;
+          } else if (_keypoints_list_openpose[2].y > 0) {
+            v_sho = _keypoints_list_openpose[2].y;
+            cov2D_SHO = _cov2D_vec[2];
+          } else {
+            v_sho = _keypoints_list_openpose[5].y;
+            cov2D_SHO = _cov2D_vec[5];
+          }
+          float variance_shoY = cov2D_SHO(1, 1);
+
+          float v_hip_tmp;
+          float v_hip;
+          Eigen::Matrix2f cov2D_HIP;
+          if (_keypoints_list_openpose[8].y > 0 && _keypoints_list_openpose[11].y > 0) {
+            v_hip_tmp =
+                fabs(_keypoints_list_openpose[8].y - _keypoints_list_openpose[11].y) / 2.0f;
+            if (_keypoints_list_openpose[8].y < _keypoints_list_openpose[11].y) {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[8].y;
+            } else {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[11].y;
+            }
+            cov2D_HIP = (_cov2D_vec[11] + _cov2D_vec[8]) / 2.0;
+          } else if (_keypoints_list_openpose[8].y > 0) {
+            v_hip = _keypoints_list_openpose[8].y;
+            cov2D_HIP = _cov2D_vec[8];
+          } else {
+            v_hip = _keypoints_list_openpose[11].y;
+            cov2D_HIP = _cov2D_vec[11];
+          }
+          float variance_hipY = cov2D_HIP(1, 1);
+
+          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+
+          // cout << "Z---------->    " << Z << endl;
+
+          for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
+            Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
+            if (!(cov2D_TMP.array() == -1).all()) {
+              Eigen::Matrix<float, 3, 2> J;
+              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+
+              float variance_z_Hp =
+                  pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
+              float variance_z_sho =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_shoY;
+              float variance_z_hip =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_hipY;
+              float variance_z =
+                  variance_z_Hp + variance_z_sho + variance_z_hip;
+
+              Eigen::Matrix3f covMatrixZ;
+              covMatrixZ << 0, 0, 0, 0, 0, 0, 0, 0, variance_z;
+
+              Eigen::Matrix3f covMatrix3D =
+                  J * cov2D_TMP * J.transpose() + covMatrixZ;
+              _cov3D_vec.push_back(covMatrix3D);
+              _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
+            } else {
+              Eigen::Matrix3f covMatrixZ_NaN;
+              covMatrixZ_NaN.setConstant(-1);
+              _cov3D_vec.push_back(covMatrixZ_NaN);
+              _cov3D[keypoints_map_openpose[i]] = covMatrixZ_NaN; // store the 3D covariance matrix in the map
+            }
+          }
+        }
+      }
+      return return_type::success;
+    } 
+    else {
       cout << "\033[1;31mUnknown video source type. Cannot compute 3D covariance.\033[0m" << endl;
       return return_type::error;
     }
-  
   }
 
   /**
