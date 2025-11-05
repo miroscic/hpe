@@ -35,9 +35,9 @@ cmake --build build --config Release
 cmake --install build --config Release
 ```
 
-## Windows — Detailed installation (Windows-specific)
+## Windows — Detailed installation
 
-The steps below describe how to prepare a Windows development machine for building and running the `hpe` plugin and its dependencies. These instructions are based on the project's `INSTALLATION_README.md` and target Windows 10/11.
+The steps below describe how to prepare a Windows development machine for building and running the `hpe` plugin and its dependencies.
 
 1. Install MADS
 
@@ -173,15 +173,13 @@ This forces CMake to refresh the plugin/pugg subprojects and pick up the new MAD
 ```powershell
 mads-broker -n list
 ```
-
-	- This prints available network interfaces and their IP addresses. Choose the interface you want (for example, index `11` or name `en0`) and start the broker bound to that interface:
+    This prints available network interfaces and their IP addresses. Choose the interface you want (for example, index `11` or name `en0`) and start the broker bound to that interface:
 
 ```powershell
 # Example: bind to interface named en0
 mads-broker -n en0
 ```
-
-	- The broker will print the `<IP>` and `<PORT>` that remote agents should use. If agents run on the same machine as the broker, you can omit IP and PORT when starting them.
+    The broker will print the `<IP>` and `<PORT>` that remote agents should use. If agents run on the same machine as the broker, you can omit IP and PORT when starting them.
 
 2. If you want to save data to MongoDB, ensure the Mongo container is running (see step 12 above) or start it with Docker.
 
@@ -213,27 +211,114 @@ This allows you to compile the project even on systems where Kinect Azure librar
 
 ## Debug Options
 
-The plugin supports several debug options that can be configured in the `params.json` file under the `debug` section. Each option enables debugging output for specific processing stages:
+All runtime debug flags are read from the `mads.ini` file under the `[hpe.debug]` section (see the example below). Each boolean flag enables additional logging, diagnostics and (in some cases) saving of intermediate files into a `Debug/` folder. Enabling debug options can slow processing and increase disk usage — use them only when troubleshooting.
 
-- **`skeleton_from_depth_compute`**: Enables debug output for 3D skeleton computation from depth camera data (Kinect Azure). Prints body detection status and joint position processing on the terminal.
+For each flag we list (A) what is printed to the terminal when the flag is enabled and (B) what files (if any) are written to disk and where.
 
-- **`skeleton_from_rgb_compute`**: Enables debug output for 2D skeleton computation from RGB camera using OpenVINO human pose estimation model. Draws pose detection pipeline status.
+- `setup_video_capture` (boolean)
+	- Terminal output:
+		- Camera/device detection and chosen device id (e.g. "Camera id: 0" or default message).
+		- Selected resolution and framerate information.
+		- Kinect Azure calibration and tracker processing mode messages (e.g. "Body tracker processing mode: ...").
+		- Warnings/errors if devices fail to open or transforms cannot be created.
+		- Messages when debug directories are created (e.g. "Created debug directory: <path>").
+	- Saved files (when enabled):
+		- `Debug/camera_intrinsics.csv` — CSV with cx, cy, fx, fy (created for MKV/dummy and Azure cases).
+		- `Debug/conversion matrices/x_conversion_matrix.txt` and `.../y_conversion_matrix.txt` — pixel-to-real-world conversion matrices (TXT).
+		- Transformed RGB images saved as `azure_rgb_transformed_to_depth_coordinates.jpg` or `mkv_rgb_transformed_to_depth_coordinates.jpg` inside the `Debug/` tree.
 
-- **`point_cloud_filter`**: Not developed yet.
+- `acquire_frame` (boolean)
+	- Terminal output:
+		- Per-frame acquisition status and errors (e.g. "Error: Failed to get valid color image ...").
+		- For MKV/dummy mode it logs frame timestamps and the global frame counter (frame time and counter values).
+		- Warnings about missing streams in MKV (e.g. "This MKV file might not contain color stream data").
+	- Saved files (when enabled):
+		- Dummy/MKV mode: RGB and depth images saved under `Debug/rgb images in depth coordinates/` and `Debug/depth images/` with filenames containing agent id and timestamp/frame number.
 
-- **`hessian_compute`**: Not developed yet.
+- `skeleton_from_depth_compute` (boolean)
+	- Terminal output:
+		- Logs when no bodies are detected ("No bodies detected in the frame.").
+		- If a body is detected and debug is true, prints the entire 3D skeleton to the terminal (each joint name and [x,y,z]).
+	- Saved files:
+		- The code does not write per-joint files here, but the body-index map is used by `point_cloud_filter` and may indirectly cause point-cloud files to be created (see `point_cloud_filter`).
 
-- **`cov3D_compute`**: Saves a json file with the covariances in the folder "Debug/Covariances 3D".
+- `skeleton_from_rgb_compute` (boolean)
+	- Terminal output:
+		- Pipeline readiness and errors (e.g. "Pipeline is not ready to process", "Timeout waiting for pipeline data").
+		- If debug rendering succeeds, the plugin may print warnings about failed rendering.
+	- Saved files:
+		- The code modifies `_rgb` with annotated poses when debug is true. It does not automatically save the annotated images to disk here, but those images can be inspected via `viewer` (or saved if you extend the code).
 
-- **`viewer`**: Enables real-time visualization windows showing RGB and depth images side by side. Press ESC to exit the viewer.
+- `hessian_compute` (boolean)
+	- Terminal output:
+		- Warnings/errors if the pipeline is not initialized or no keypoints are available.
+		- No large text dumps by default, but debug mode draws diagnostic overlays and may print warnings.
+	- Saved files:
+		- None by default. The function draws ellipses and keypoints on `_rgb` when debug is enabled (visible in the viewer or savable if you add image-saving logic).
 
-## INI settings
+- `cov3D_compute` (boolean)
+	- Terminal output:
+		- May show messages about created covariances debug directory (e.g. "Created covariances debug directory: <path>").
+	- Saved files:
+		- `Debug/Covariances 3D/cov3D_data.json` — appended JSON frames containing the 3x3 covariance matrices for each processed frame when debug is enabled.
+
+- `consistency_check` (boolean)
+	- Terminal output:
+		- Currently the code only prints a single line: "Performing consistency check..."; the actual consistency logic is not implemented (this function is effectively a stub).
+	- Saved files:
+		- None (no consistency reports are saved because the logic is not implemented).
+
+- `point_cloud_filter` (boolean)
+	- Terminal output:
+		- Messages when body index map is null or when filtering is disabled (e.g. "Body index map is null. Creating unfiltered point cloud.").
+		- Possible warnings/errors during point cloud creation.
+	- Saved files:
+		- If debug is enabled the plugin writes PLY files for filtered/unfiltered point clouds into `Debug/point clouds/` named `<frame>_filtered_point_cloud_frame.ply` or `<frame>_unfiltered_point_cloud_frame.ply`.
+
+- `coordinate_transform` (boolean)
+	- Terminal output:
+		- Prints the message "Applying camera coordinate transformation..." and, if debug is true, prints the transformed 3D joint coordinates to the terminal.
+	- Saved files:
+		- None by default.
+
+- `viewer` (boolean)
+	- Terminal output:
+		- Prints messages when exiting the viewer ("Exiting viewer...") and warnings if the viewer cannot be launched for the chosen video source.
+	- Saved files:
+		- The viewer displays images in real-time but does not save files by itself. Use other debug flags (e.g. `acquire_frame` or custom code) to persist displayed frames.
+
+Notes:
+
+- You can enable multiple flags at once; however combined debugging can significantly reduce runtime throughput and increase disk usage.
+- The plugin creates debug directories relative to the source location (it searches upward from the source directory for an `hpe` folder and places `Debug/` there). If that search fails, it falls back to a `Debug/` directory next to the source file.
+- Clean up `Debug/` periodically — images, PLYs and JSON logs can grow quickly when debugging is enabled.
+
+## INI settings (example)
 
 The plugin supports the following settings in the INI file:
 
 ```ini
 [hpe]
-# Describe the settings available to the plugin
+pub_topic = "hpe_out"
+period = 30
+azure_device = 0
+CUDA = false
+model_file = "C:/mirrorworld/hpe/models/human-pose-estimation-0001.xml"
+dummy = false
+filter_point_cloud = false
+resolution_rgb = "1280x720"
+
+[hpe.debug]
+setup_video_capture = false
+acquire_frame = false
+skeleton_from_depth_compute = false
+skeleton_from_rgb_compute = false
+hessian_compute = false
+cov3D_compute = false
+consistency_check = false
+point_cloud_filter = false
+coordinate_transform = false
+viewer = false
 
 [hpe.SN000367520812]
 Rxx = 1

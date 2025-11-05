@@ -1,4 +1,3 @@
 Intrinsic Param of RGB Cameras from INI
 Intrinsic Param of RASPI Camera from INI
-Coordinate Transform of the Covariances
 Destructor

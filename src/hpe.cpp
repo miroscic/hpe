@@ -3187,20 +3187,8 @@ INSTALL_SOURCE_DRIVER(HpePlugin, json)
 For testing purposes, when directly executing the plugin
 */
 int main(int argc, char const *argv[]) {
-  HpePlugin plugin;
-  json output, params;
-
-  // Set example values to params
-  params["test"] = "value";
-
-  // Set the parameters
-  plugin.set_params(&params);
-
-  // Process data
-  plugin.get_output(output);
-
-  // Produce output
-  cout << "Output: " << output << endl;
+  
+  cout << "Testing HpePlugin plugin not implemented yet..." << endl;
 
   return 0;
 }
