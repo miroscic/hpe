@@ -2847,7 +2847,6 @@ public:
     out.clear();
 
     auto start_get_output = std::chrono::high_resolution_clock::now();
-
     auto time_prev = std::chrono::high_resolution_clock::now();
 
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
@@ -2860,8 +2859,7 @@ public:
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
     auto time_now = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Acquire frame: " << duration.count() << " microseconds" << endl;
+    auto duration_acquire_frame = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     #ifdef KINECT_AZURE_LIBS
@@ -2873,8 +2871,7 @@ public:
     #endif
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Skeleton call: " << duration.count() << " microseconds" << endl;
+    auto duration_skeleton_call = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
@@ -2882,8 +2879,7 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Skeleton rgb: " << duration.count() << " microseconds" << endl;
+    auto duration_skeleton_rgb = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
@@ -2891,8 +2887,7 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Hessian compute: " << duration.count() << " microseconds" << endl;
+    auto duration_hessian = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
@@ -2900,8 +2895,7 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Cov compute: " << duration.count() << " microseconds" << endl;
+    auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
@@ -2909,8 +2903,7 @@ public:
     }
     
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Skeleton depth: " << duration.count() << " microseconds" << endl;
+    auto duration_skeleton_depth = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
@@ -2918,8 +2911,7 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Point cloud filter: " << duration.count() << " microseconds" << endl;
+    auto duration_point_cloud_filter = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (coordinate_transform(_params["debug"]["coordinate_transform"]) == return_type::error) {
@@ -2927,8 +2919,7 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Coordinate transform: " << duration.count() << " microseconds" << endl;
+    auto duration_coordinate_transform = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
     if (viewer(_params["debug"]["viewer"]) == return_type::error) {
@@ -2936,8 +2927,7 @@ public:
     }
     
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Viewer: " << duration.count() << " microseconds" << endl;
+    auto duration_viewer = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
 
@@ -2998,10 +2988,8 @@ public:
     }
 
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Output prepare: " << duration.count() << " microseconds" << endl;
+    auto duration_output_prepare = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
-
 
     // clear the fields for the next frame
     _skeleton2D.clear();
@@ -3011,12 +2999,23 @@ public:
     _cov3D_vec.clear();
     
     time_now = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(time_now - time_prev);
-    std::cout << "Output clear: " << duration.count() << " microseconds" << endl;
+    auto duration_output_clear = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    auto duration_get_output = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - start_get_output);
 
-    auto stop_get_output = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop_get_output - start_get_output);
-    std::cout << "GET OUTPUT TIME: " << duration.count() << " microseconds" << endl;
+    if (_params["debug"]["check_computation_time"]) {
+      cout << "Acquire frame: " << duration_acquire_frame.count() << " milliseconds" << endl;
+      cout << "Skeleton call: " << duration_skeleton_call.count() << " milliseconds" << endl;
+      cout << "Skeleton rgb: " << duration_skeleton_rgb.count() << " milliseconds" << endl;
+      cout << "Hessian compute: " << duration_hessian.count() << " milliseconds" << endl;
+      cout << "Cov compute: " << duration_cov.count() << " milliseconds" << endl;
+      cout << "Skeleton depth: " << duration_skeleton_depth.count() << " milliseconds" << endl;
+      cout << "Point cloud filter: " << duration_point_cloud_filter.count() << " milliseconds" << endl;
+      cout << "Coordinate transform: " << duration_coordinate_transform.count() << " milliseconds" << endl;
+      cout << "Viewer: " << duration_viewer.count() << " milliseconds" << endl;
+      cout << "Output prepare: " << duration_output_prepare.count() << " milliseconds" << endl;
+      cout << "Output clear: " << duration_output_clear.count() << " milliseconds" << endl;
+      cout << "\033[1;33mGET OUTPUT TIME: " << duration_get_output.count() << " milliseconds\033[0m" << endl;
+    }
 
     return return_type::success;
   }

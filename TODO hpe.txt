@@ -1,6 +1,8 @@
 Intrinsic Param of RGB Cameras from INI
 Intrinsic Param of RASPI Camera from INI
 Destructor
+Revisione codice plugin HPE per parallelizzare quanto possibile e per usare oneMKL invece di BLAS/LAPACK standard
+Controllare compatibilità timestamp tra dummy e realtime
 
 Capire questi possibile BUG
 skeleton_from_depth_compute

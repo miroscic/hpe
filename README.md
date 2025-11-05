@@ -127,15 +127,10 @@ cmake --build build --config Release -t install
 12. Optional: MongoDB for storing logs
 
 	- Install and run Docker Desktop (no login required): https://www.docker.com/
-	- Start a MongoDB container (from the project root you can create a `db` folder to persist data):
+	- Start a MongoDB container (from the project root you can create a `db` folder to persist data) and install the MongoDB C++ driver locally (instructions summarized). Add `C:\mongo-cxx-driver\bin` to PATH if you installed it there.
 
 ```powershell
 docker run --name mads-mongo --restart unless-stopped -v ${PWD}/db:/data/db -p27017:27017 -d mongo
-```
-
-	- Install the MongoDB C++ driver locally (instructions summarized):
-
-```powershell
 # Download the mongo-cxx-driver archive (or use browser to download if curl flags are not supported)
 curl -OL https://github.com/mongodb/mongo-cxx-driver/releases/download/r4.1.1/mongo-cxx-driver-r4.1.1.tar.gz
 # or download via browser and extract
@@ -145,8 +140,6 @@ cmake -G "Visual Studio 17 2022" -A "x64" -DCMAKE_CXX_STANDARD=17 -DCMAKE_INSTAL
 cmake --build . --config RelWithDebInfo
 cmake --build . --target install --config RelWithDebInfo
 ```
-
-	- Add `C:\mongo-cxx-driver\bin` to PATH if you installed it there.
 
 ### Updating MADS without recompiling everything
 
@@ -214,6 +207,9 @@ All runtime debug flags are read from the `mads.ini` file under the `[hpe.debug]
 
 For each flag we list (A) what is printed to the terminal when the flag is enabled and (B) what files (if any) are written to disk and where.
 
+- `check_computation_time` (boolean): 
+    - Prints computational times for each step.
+
 - `setup_video_capture` (boolean)
     - Camera/device detection and chosen device id (e.g. "Camera id: 0" or default message).
     - Selected resolution and framerate information.
@@ -276,6 +272,7 @@ filter_point_cloud = false
 resolution_rgb = "1280x720"
 
 [hpe.debug]
+check_computational_times = true
 setup_video_capture = false
 acquire_frame = false
 skeleton_from_depth_compute = false
