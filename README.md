@@ -298,10 +298,3 @@ Tx = 0
 Ty = 0
 Tz = 0
 ```
-
-
-## Executable demo
-
-<Explain what happens if the test executable is run>
-
----
