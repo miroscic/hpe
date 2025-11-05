@@ -1,4 +1,4 @@
-Scarica exe e installa mads (dalla versione 1.3.2):
+Scarica exe e installa l'ultima versione di mads:
 https://github.com/pbosetti/MADS/releases
 
 Scarica exe da:
@@ -84,7 +84,20 @@ cmake --build . --target install --config RelWithDebInfo
 Aggiungere al path il percorso di installazione:
 "C:\mongo-cxx-driver\bin"
 
------------------------
+--------------------------------------------------------
+-------------------------------------------------------
+Per aggiornare mads all'ultima versione
+Vai sul sito git.new/mads
+Scarica release e installa
+
+Ricompila hpe. Basta cancellare tutte le cartelle plugin e pugg in build/_deps
+Esegui
+cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$(mads -p)"
+cmake --build build --config Release -t install
+
+
+-----------------------------------------------------------
+----------------------------------------------------------
 Come eseguire il broker, il logger e gli agenti hpe.
 
 Per trovare l'ip del broker da fornire agli agenti che non girano sullo stesso pc esegui:
@@ -105,13 +118,3 @@ mads-logger
 
 Esegui gli agenti hpe:
 mads-source -s tcp://<IP>:<PORT> hpe.plugin 
-
---------------
-Aggiornare mads all'ultima versione
-Vai sul sito git.new/mads
-Scarica release e installa
-
-Ricompila hpe. Basta cancellare tutte le cartelle plugin e pugg in build/_deps
-Esegui
-cmake -Bbuild -DCMAKE_INSTALL_PREFIX="$(mads -p)"
-cmake --build build --config Release -t install
