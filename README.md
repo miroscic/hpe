@@ -270,6 +270,7 @@ model_file = "C:/mirrorworld/hpe/models/human-pose-estimation-0001.xml"
 dummy = false
 filter_point_cloud = false
 resolution_rgb = "1280x720"
+calibration_mode = false
 
 [hpe.debug]
 check_computational_times = true
