@@ -1078,7 +1078,7 @@ public:
 
   /* Setup camera extrinsics from parameters
   */
-  return_type setup_camera_extrinsics(bool calibration = false, bool debug = false) {
+  return_type setup_camera_extrinsics(bool calibration_mode = false, bool debug = false) {
     // Setup camera extrinsics if provided in parameters
     
     // Initialize transformation matrix as identity
@@ -1090,7 +1090,7 @@ public:
     }
     
     // Check if transformation parameters exist for this camera serial
-    if (!calibration && _params.contains("SN" + _agent_id)) {
+    if (!calibration_mode && _params.contains("SN" + _agent_id)) {
       auto camera_params = _params["SN" + _agent_id];
       
       // Read rotation matrix components
@@ -1125,7 +1125,7 @@ public:
       }
     } else {
 
-        if (calibration)
+        if (calibration_mode)
           cout << "\033[1;33mCalibration mode active, using the identity matrix\033[0m" << endl;
         else
           cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
@@ -3049,7 +3049,7 @@ public:
       return;
     }
 
-    if (setup_camera_extrinsics(_params["calibration"],_params["debug"]["coordinate_transform"]) == return_type::error) {
+    if (setup_camera_extrinsics(_params["calibration_mode"],_params["debug"]["coordinate_transform"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
       return;
     }
