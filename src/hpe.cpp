@@ -577,7 +577,7 @@ public:
           _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
         } else {
           cout << "Body tracker CUDA processor disabled! Using CPU instead." << endl;
-          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_CPU;
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_DIRECTML;
         }
       }
       cout << "Body tracker processing mode: " << _kinect_tracker_config.processing_mode << endl;
