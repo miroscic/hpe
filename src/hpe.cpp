@@ -2052,11 +2052,11 @@ public:
         }
       } else{
         // Handle case when body index map is null OR when filtering is disabled
-        if(_body_index_map == nullptr) {
+        /*if(_body_index_map == nullptr) {
           cout << "\033[1;34mBody index map is null. Creating unfiltered point cloud.\033[0m" << endl;
         } else {
           cout << "\033[1;34mPoint cloud filtering is disabled. Creating unfiltered point cloud.\033[0m" << endl;
-        }
+        }*/
         
         // Create unfiltered point cloud using the original depth image
         k4a_image_t depth_handle = _k4a_depth_image.handle();
