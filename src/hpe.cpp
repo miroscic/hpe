@@ -757,7 +757,8 @@ public:
                 if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
                   int frame_number = frame_obj["frame"].get<int>();
                   auto ns = frame_obj["timestamp_ns"].get<long long>();;
-                  _frame_timestamps[frame_number] = chrono::steady_clock::time_point(chrono::nanoseconds(ns));
+                    _frame_timestamps[frame_number] = chrono::system_clock::time_point(
+                      chrono::duration_cast<chrono::system_clock::duration>(chrono::nanoseconds(ns)));
                 }
               }
             }
@@ -1046,7 +1047,7 @@ public:
     }
 
     if (_video_source != KINECT_AZURE_DUMMY && _video_source != RGB_CAMERA_DUMMY && _video_source != RASPI_RGB_CAMERA_DUMMY)
-      _frame_time = chrono::steady_clock::now();
+      _frame_time = chrono::system_clock::now();
     else{
       _frame_time = _frame_timestamps[_global_frame_counter];
       cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
@@ -1699,7 +1700,7 @@ public:
    */
   return_type acquire_frame( bool debug = false) {
 
-    _frame_time = chrono::steady_clock::now();
+    _frame_time = chrono::system_clock::now();
 
     if (_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
@@ -1918,7 +1919,7 @@ public:
       
       if (_body_frame != nullptr) {
         if (_body_frame.get_num_bodies() == 0) {
-            cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
+          //cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
           return return_type::error;
         }
         
@@ -3077,7 +3078,7 @@ protected:
 
   string _agent_id; /**< the agent ID */
   string _model_file; /**< the model file path */
-  chrono::steady_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
+  chrono::system_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
   int _camera_device = 0;
   data_t _fps = 25;
   
@@ -3159,7 +3160,7 @@ protected:
   vector<HumanPose> _poses_openpose; /**<  contains all the keypoints of all identified people */
 
   int _global_frame_counter = 0; /**< global frame counter for dummy */
-  map<int, chrono::steady_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
+  map<int, chrono::system_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
 
 };
 
