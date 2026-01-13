@@ -241,27 +241,57 @@ public:
 
     if(_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
+        // Close and free Kinect Azure resources
+        if (_point_cloud_transformation) {
+          k4a_transformation_destroy(_point_cloud_transformation);
+          _point_cloud_transformation = nullptr;
+        }
+        if (_kinect_color_transformation_handle) {
+          k4a_transformation_destroy(_kinect_color_transformation_handle);
+          _kinect_color_transformation_handle = nullptr;
+        }
+        // Explicitly close tracker and device
+        _kinect_tracker.shutdown();
+        _kinect_device.close();
+        std::cout << "Kinect Azure device and tracker closed." << std::endl;
 
       #endif
     }
     else if (_video_source == RGB_CAMERA){
-
+      // Release OpenCV video capture
+      if (_cap.isOpened()) {
+        _cap.release();
+      }
     }
     else if (_video_source == RASPI_RGB_CAMERA){
       #ifdef __linux
-        
+        // PiCamera is managed by lccv library, will be cleaned up automatically
       #endif
     }
     else if(_video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
-
+        // Close and free Kinect Azure MKV playback resources
+        if (_mkv_color_transformation_handle) {
+          k4a_transformation_destroy(_mkv_color_transformation_handle);
+          _mkv_color_transformation_handle = nullptr;
+        }
+        if (_kinect_mkv_playback_handle) {
+          k4a_playback_close(_kinect_mkv_playback_handle);
+          _kinect_mkv_playback_handle = nullptr;
+        }
       #endif
     }
     else if(_video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY){
-
+      // No specific resources to free for dummy modes
     }
 
-    delete _pipeline;
+    // Delete the pipeline object
+    if (_pipeline != nullptr) {
+      delete _pipeline;
+      _pipeline = nullptr;
+    }
+
+    std::cout << "HpePlugin resources cleaned up." << std::endl;
   }
 
  
