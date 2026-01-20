@@ -351,6 +351,10 @@ public:
   }
 
   bool is_raspberry_pi() {
+
+#ifndef __linux
+    return false;
+#else
     // Check if the platform is a Raspberry Pi
     ifstream cpuinfo("/proc/cpuinfo");
     string line;
@@ -360,6 +364,7 @@ public:
       }
     }
     return false;
+#endif
   }
 
   bool is_rgb_camera_connected() {
@@ -735,6 +740,20 @@ public:
       // _camera.options->framerate = 25;
       // _camera.options->verbose = false;
       #ifdef __linux
+
+      std::ifstream cpuinfo("/proc/cpuinfo");
+      std::string line;
+
+      while (std::getline(cpuinfo, line)) {
+          if (line.find("Serial") != std::string::npos) {
+            serial = line.substr(line.find(":") + 2);
+            serial.erase(remove_if(serial.begin(), serial.end(), ::isspace), serial.end());
+            break;
+          }
+      }
+
+      _agent_id = serial;
+
       _raspi_rgb_camera.startVideo();
 
       do
@@ -2012,7 +2031,7 @@ public:
       if (_body_frame != nullptr) {
         if (_body_frame.get_num_bodies() == 0) {
           //cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
-          return return_type::error;
+          return return_type::retry;
         }
         
         // Only take one body (always the first one)
@@ -3048,11 +3067,11 @@ public:
         
         if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
           
-          out[keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
+          out["joints"][keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
 
-          out[keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
+          out["joints"][keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
          
-          out[keypoints_map_openpose[kp]]["unc"] = 
+          out["joints"][keypoints_map_openpose[kp]]["unc"] = 
             {
               _cov3D[keypoints_map_openpose[kp]](0, 0),   // Ux
               _cov3D[keypoints_map_openpose[kp]](1, 1),   // Uy
