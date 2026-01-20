@@ -241,27 +241,57 @@ public:
 
     if(_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
+        // Close and free Kinect Azure resources
+        if (_point_cloud_transformation) {
+          k4a_transformation_destroy(_point_cloud_transformation);
+          _point_cloud_transformation = nullptr;
+        }
+        if (_kinect_color_transformation_handle) {
+          k4a_transformation_destroy(_kinect_color_transformation_handle);
+          _kinect_color_transformation_handle = nullptr;
+        }
+        // Explicitly close tracker and device
+        _kinect_tracker.shutdown();
+        _kinect_device.close();
+        std::cout << "Kinect Azure device and tracker closed." << std::endl;
 
       #endif
     }
     else if (_video_source == RGB_CAMERA){
-
+      // Release OpenCV video capture
+      if (_cap.isOpened()) {
+        _cap.release();
+      }
     }
     else if (_video_source == RASPI_RGB_CAMERA){
       #ifdef __linux
-        
+        // PiCamera is managed by lccv library, will be cleaned up automatically
       #endif
     }
     else if(_video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
-
+        // Close and free Kinect Azure MKV playback resources
+        if (_mkv_color_transformation_handle) {
+          k4a_transformation_destroy(_mkv_color_transformation_handle);
+          _mkv_color_transformation_handle = nullptr;
+        }
+        if (_kinect_mkv_playback_handle) {
+          k4a_playback_close(_kinect_mkv_playback_handle);
+          _kinect_mkv_playback_handle = nullptr;
+        }
       #endif
     }
     else if(_video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY){
-
+      // No specific resources to free for dummy modes
     }
 
-    delete _pipeline;
+    // Delete the pipeline object
+    if (_pipeline != nullptr) {
+      delete _pipeline;
+      _pipeline = nullptr;
+    }
+
+    std::cout << "HpePlugin resources cleaned up." << std::endl;
   }
 
  
@@ -577,7 +607,7 @@ public:
           _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_CUDA;
         } else {
           cout << "Body tracker CUDA processor disabled! Using CPU instead." << endl;
-          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_CPU;
+          _kinect_tracker_config.processing_mode = K4ABT_TRACKER_PROCESSING_MODE_GPU_DIRECTML;
         }
       }
       cout << "Body tracker processing mode: " << _kinect_tracker_config.processing_mode << endl;
@@ -757,7 +787,8 @@ public:
                 if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
                   int frame_number = frame_obj["frame"].get<int>();
                   auto ns = frame_obj["timestamp_ns"].get<long long>();;
-                  _frame_timestamps[frame_number] = chrono::steady_clock::time_point(chrono::nanoseconds(ns));
+                    _frame_timestamps[frame_number] = chrono::system_clock::time_point(
+                      chrono::duration_cast<chrono::system_clock::duration>(chrono::nanoseconds(ns)));
                 }
               }
             }
@@ -1046,7 +1077,7 @@ public:
     }
 
     if (_video_source != KINECT_AZURE_DUMMY && _video_source != RGB_CAMERA_DUMMY && _video_source != RASPI_RGB_CAMERA_DUMMY)
-      _frame_time = chrono::steady_clock::now();
+      _frame_time = chrono::system_clock::now();
     else{
       _frame_time = _frame_timestamps[_global_frame_counter];
       cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
@@ -1078,7 +1109,52 @@ public:
 
   /* Setup camera extrinsics from parameters
   */
-  return_type setup_camera_extrinsics(bool debug = false) {
+  /**
+   * Normalize rotation matrix using SVD decomposition
+   * Ensures the rotation matrix is orthonormal and has determinant = 1
+   * @param R_input 3x3 rotation matrix (may be slightly distorted)
+   * @return Corrected orthonormal rotation matrix
+   */
+  Eigen::Matrix3f normalize_rotation_matrix(const Eigen::Matrix3f& R_input, bool debug = false) {
+    // Perform SVD decomposition: R = U * Sigma * V^T
+    Eigen::JacobiSVD<Eigen::Matrix3f> svd(R_input, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    
+    // Reconstruct orthonormal matrix: R_corrected = U * V^T
+    Eigen::Matrix3f R_corrected = svd.matrixU() * svd.matrixV().transpose();
+    
+    // Ensure determinant = 1 (not -1, which would indicate a reflection)
+    if (R_corrected.determinant() < 0) {
+      R_corrected.col(2) *= -1;
+    }
+    
+    if (debug) {
+      float error = (R_input - R_corrected).norm();
+      cout << "\033[1;36mRotation matrix normalization error: " << error << "\033[0m" << endl;
+      if (error > 0.01f) {
+        cout << "\033[1;33mWarning: Rotation matrix had significant distortion, corrected by SVD\033[0m" << endl;
+      }
+    }
+    
+    return R_corrected;
+  }
+
+  /**
+   * Check if rotation matrix is orthonormal
+   * @param R 3x3 rotation matrix
+   * @return true if matrix is valid (det(R)=1, R*R^T=I), false otherwise
+   */
+  bool is_valid_rotation_matrix(const Eigen::Matrix3f& R, float tolerance = 0.01f) {
+    // Check if R * R^T = I (orthonormality)
+    Eigen::Matrix3f identity_check = R * R.transpose();
+    Eigen::Matrix3f identity = Eigen::Matrix3f::Identity();
+    
+    // Check determinant is 1 (no reflection)
+    float det = R.determinant();
+    
+    return (identity_check - identity).norm() < tolerance && std::abs(det - 1.0f) < tolerance;
+  }
+
+  return_type setup_camera_extrinsics(bool calibration_mode = false, bool debug = false) {
     // Setup camera extrinsics if provided in parameters
     
     // Initialize transformation matrix as identity
@@ -1090,7 +1166,7 @@ public:
     }
     
     // Check if transformation parameters exist for this camera serial
-    if (_params.contains("SN" + _agent_id)) {
+    if (!calibration_mode && _params.contains("SN" + _agent_id)) {
       auto camera_params = _params["SN" + _agent_id];
       
       // Read rotation matrix components
@@ -1109,14 +1185,31 @@ public:
       float Ty = camera_params.contains("Ty") ? camera_params["Ty"].get<float>() : 0.0f;
       float Tz = camera_params.contains("Tz") ? camera_params["Tz"].get<float>() : 0.0f;
       
+      // Construct rotation matrix and validate/normalize it
+      Eigen::Matrix3f R_input;
+      R_input << Rxx, Rxy, Rxz,
+                 Ryx, Ryy, Ryz,
+                 Rzx, Rzy, Rzz;
+      
+      // Check if rotation matrix is valid
+      if (!is_valid_rotation_matrix(R_input)) {
+        if (debug) {
+          cout << "\033[1;33mWarning: Rotation matrix is not perfectly orthonormal\033[0m" << endl;
+        }
+        // Normalize using SVD
+        R_input = normalize_rotation_matrix(R_input, debug);
+      } else if (debug) {
+        cout << "\033[1;32mRotation matrix is orthonormal and valid\033[0m" << endl;
+      }
+      
       // Build the 4x4 transformation matrix
       // [Rxx Rxy Rxz Tx]
       // [Ryx Ryy Ryz Ty]
       // [Rzx Rzy Rzz Tz]
       // [ 0   0   0   1]
-      _camera_transformation_matrix << Rxx, Rxy, Rxz, Tx,
-                                      Ryx, Ryy, Ryz, Ty,
-                                      Rzx, Rzy, Rzz, Tz,
+      _camera_transformation_matrix << R_input(0,0), R_input(0,1), R_input(0,2), Tx,
+                                      R_input(1,0), R_input(1,1), R_input(1,2), Ty,
+                                      R_input(2,0), R_input(2,1), R_input(2,2), Tz,
                                       0.0f, 0.0f, 0.0f, 1.0f;
       
       if (debug) {
@@ -1124,9 +1217,12 @@ public:
         cout << _camera_transformation_matrix << endl;
       }
     } else {
-      if (debug) {
-        cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
-      }
+
+        if (calibration_mode)
+          cout << "\033[1;33mCalibration mode active, using the identity matrix\033[0m" << endl;
+        else
+          cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
+
       return return_type::warning;
     }
 
@@ -1164,6 +1260,18 @@ public:
                                 static_cast<float>(point[2]));
     Eigen::Vector3f transformed = apply_camera_transformation(eigen_point);
     return std::vector<float>{transformed.x(), transformed.y(), transformed.z()};
+  }
+
+  /**
+   * Apply camera transformation matrix to a 3D matrix
+   * @param matrix The input 3D matrix
+   * @return The transformed 3D matrix
+   */
+  Eigen::Matrix3f apply_camera_transformation(const Eigen::Matrix3f& matrix) {
+
+    // Apply transformation matrix
+    Eigen::Matrix3f transformed = _camera_transformation_matrix.block<3, 3>(0, 0).transpose() * matrix * _camera_transformation_matrix.block<3, 3>(0, 0);
+    return transformed;
   }
 
   #ifdef KINECT_AZURE_LIBS
@@ -1684,7 +1792,7 @@ public:
    */
   return_type acquire_frame( bool debug = false) {
 
-    _frame_time = chrono::steady_clock::now();
+    _frame_time = chrono::system_clock::now();
 
     if (_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
@@ -1891,17 +1999,19 @@ public:
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
+      /*
       if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
         // It should never hit timeout when K4A_WAIT_INFINITE is set.
         cout << "Error! Add capture to tracker process queue timeout!" << endl;
         return return_type::error;
       } 
+      */
 
       _body_frame = _kinect_tracker.pop_result();
       
       if (_body_frame != nullptr) {
         if (_body_frame.get_num_bodies() == 0) {
-            cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
+          //cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
           return return_type::error;
         }
         
@@ -1993,7 +2103,7 @@ public:
         if (masked_depth_image != NULL) {
           // get raw buffer
           uint8_t *buffer = masked_depth_image.get_buffer();
-          cout << "Depth image buffer:" << buffer << endl;
+          //cout << "Depth image buffer:" << buffer << endl;
 
           // convert the raw buffer to cv::Mat
           int rows = masked_depth_image.get_height_pixels();
@@ -2035,11 +2145,11 @@ public:
         }
       } else{
         // Handle case when body index map is null OR when filtering is disabled
-        if(_body_index_map == nullptr) {
+        /*if(_body_index_map == nullptr) {
           cout << "\033[1;34mBody index map is null. Creating unfiltered point cloud.\033[0m" << endl;
         } else {
           cout << "\033[1;34mPoint cloud filtering is disabled. Creating unfiltered point cloud.\033[0m" << endl;
-        }
+        }*/
         
         // Create unfiltered point cloud using the original depth image
         k4a_image_t depth_handle = _k4a_depth_image.handle();
@@ -2104,6 +2214,15 @@ public:
         // Apply the camera transformation matrix
         vector<float> joint_3d_transformed = apply_camera_transformation(joint_3d);
         _skeleton3D[joint_name] = joint_3d_transformed;
+      }
+    }
+
+    // Transform each keypoint in the 3D skeleton
+    for (auto& [joint_name, cov_3d] : _cov3D) {
+      if (cov_3d.size() >= 3) {
+        // Apply the camera transformation matrix
+        Eigen::Matrix3f cov_3d_transformed = apply_camera_transformation(cov_3d);
+        _cov3D[joint_name] = cov_3d_transformed;
       }
     }
 
@@ -2191,7 +2310,7 @@ public:
 
       if (debug) {
         try {
-          renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
+          _rgb = renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
         } catch (const std::exception& e) {
           cout << "\033[1;33mWarning: Failed to render pose: " << e.what() << "\033[0m" << endl;
         }
@@ -2508,17 +2627,232 @@ public:
 
       return return_type::success;
     }
-    else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
-             _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+    
+    else if (_video_source == RASPI_RGB_CAMERA || _video_source == RASPI_RGB_CAMERA_DUMMY) {
 
-              
+      // RASPI Intrinsic parameters
+      float f_mm =
+          6; // focal length in mm
+             // https://grobotronics.com/raspberry-pi-hq-camera-lens-6mm-wide-angle.html?sl=en
+      // Sensor dimensions:
+      float d_x = (4056 * 1.55) /
+                  1000; // https://www.waveshare.com/wiki/Raspberry_Pi_HQ_Camera
+      float d_y = (3040 * 1.55) / 1000;
+
+      int H = _rgb.rows; // image size after resize
+      int W = _rgb.cols;
+
+      _fx = (f_mm * W) / d_x; // focal length in pixel
+      _fy = (f_mm * H) / d_y; // focal length in pixel
+
+      _cx = W / 2; // coordinate of the principal point
+      _cy = H / 2;
+
+      float Hp =
+          500; // Real "height" of the selected person in mm between nec and hip
+      float sigmaHp = 2; // mm
+
+      if (_keypoints_list_openpose.size() > 0) { // at least one person
+        if (((_keypoints_list_openpose[2].y > 0) || (_keypoints_list_openpose[5].y > 0)) &&
+            ((_keypoints_list_openpose[8].y > 0) ||
+             (_keypoints_list_openpose[11].y >
+              0))) { // 2 = SHOR      5 = SHOL     8 = HIPR       11 = HIPL
+
+          float v_sho_tmp;
+          float v_sho;
+          Eigen::Matrix2f cov2D_SHO;
+          if (_keypoints_list_openpose[2].y > 0 && _keypoints_list_openpose[5].y > 0) {
+            v_sho_tmp =
+                fabs(_keypoints_list_openpose[2].y - _keypoints_list_openpose[5].y) / 2.0f;
+            if (_keypoints_list_openpose[2].y < _keypoints_list_openpose[5].y) {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[2].y;
+            } else {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[5].y;
+            }
+            cov2D_SHO = (_cov2D_vec[2] + _cov2D_vec[5]) / 2.0;
+          } else if (_keypoints_list_openpose[2].y > 0) {
+            v_sho = _keypoints_list_openpose[2].y;
+            cov2D_SHO = _cov2D_vec[2];
+          } else {
+            v_sho = _keypoints_list_openpose[5].y;
+            cov2D_SHO = _cov2D_vec[5];
+          }
+          float variance_shoY = cov2D_SHO(1, 1);
+
+          float v_hip_tmp;
+          float v_hip;
+          Eigen::Matrix2f cov2D_HIP;
+          if (_keypoints_list_openpose[8].y > 0 && _keypoints_list_openpose[11].y > 0) {
+            v_hip_tmp =
+                fabs(_keypoints_list_openpose[8].y - _keypoints_list_openpose[11].y) / 2.0f;
+            if (_keypoints_list_openpose[8].y < _keypoints_list_openpose[11].y) {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[8].y;
+            } else {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[11].y;
+            }
+            cov2D_HIP = (_cov2D_vec[11] + _cov2D_vec[8]) / 2.0;
+          } else if (_keypoints_list_openpose[8].y > 0) {
+            v_hip = _keypoints_list_openpose[8].y;
+            cov2D_HIP = _cov2D_vec[8];
+          } else {
+            v_hip = _keypoints_list_openpose[11].y;
+            cov2D_HIP = _cov2D_vec[11];
+          }
+          float variance_hipY = cov2D_HIP(1, 1);
+
+          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+
+          // cout << "Z---------->    " << Z << endl;
+
+          for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
+            Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
+            if (!(cov2D_TMP.array() == -1).all()) {
+              Eigen::Matrix<float, 3, 2> J;
+              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+
+              float variance_z_Hp =
+                  pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
+              float variance_z_sho =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_shoY;
+              float variance_z_hip =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_hipY;
+              float variance_z =
+                  variance_z_Hp + variance_z_sho + variance_z_hip;
+
+              Eigen::Matrix3f covMatrixZ;
+              covMatrixZ << 0, 0, 0, 0, 0, 0, 0, 0, variance_z;
+
+              Eigen::Matrix3f covMatrix3D =
+                  J * cov2D_TMP * J.transpose() + covMatrixZ;
+              _cov3D_vec.push_back(covMatrix3D);
+              _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
+            } else {
+              Eigen::Matrix3f covMatrixZ_NaN;
+              covMatrixZ_NaN.setConstant(-1);
+              _cov3D_vec.push_back(covMatrixZ_NaN);
+              _cov3D[keypoints_map_openpose[i]] = covMatrixZ_NaN; // store the 3D covariance matrix in the map
+            }
+          }
+        }
+      }
       
       return return_type::success;
-    } else {
+    }
+
+    else if (_video_source == RGB_CAMERA || _video_source == RGB_CAMERA_DUMMY){
+
+      // RGB Camera Intrinsic parameters
+      // TODO: Calibrate RGB Camera and take intrinsic param from INI
+      float f_mm =
+          6; // focal length in mm
+             // https://grobotronics.com/raspberry-pi-hq-camera-lens-6mm-wide-angle.html?sl=en
+      // Sensor dimensions:
+      float d_x = (4056 * 1.55) /
+                  1000; // https://www.waveshare.com/wiki/Raspberry_Pi_HQ_Camera
+      float d_y = (3040 * 1.55) / 1000;
+
+      int H = _rgb.rows; // image size after resize
+      int W = _rgb.cols;
+
+      _fx = (f_mm * W) / d_x; // focal length in pixel
+      _fy = (f_mm * H) / d_y; // focal length in pixel
+
+      _cx = W / 2; // coordinate of the principal point
+      _cy = H / 2;
+
+      float Hp =
+          500; // Real "height" of the selected person in mm between nec and hip
+      float sigmaHp = 2; // mm
+
+      if (_keypoints_list_openpose.size() > 0) { // at least one person
+        if (((_keypoints_list_openpose[2].y > 0) || (_keypoints_list_openpose[5].y > 0)) &&
+            ((_keypoints_list_openpose[8].y > 0) ||
+             (_keypoints_list_openpose[11].y >
+              0))) { // 2 = SHOR      5 = SHOL     8 = HIPR       11 = HIPL
+
+          float v_sho_tmp;
+          float v_sho;
+          Eigen::Matrix2f cov2D_SHO;
+          if (_keypoints_list_openpose[2].y > 0 && _keypoints_list_openpose[5].y > 0) {
+            v_sho_tmp =
+                fabs(_keypoints_list_openpose[2].y - _keypoints_list_openpose[5].y) / 2.0f;
+            if (_keypoints_list_openpose[2].y < _keypoints_list_openpose[5].y) {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[2].y;
+            } else {
+              v_sho = v_sho_tmp + _keypoints_list_openpose[5].y;
+            }
+            cov2D_SHO = (_cov2D_vec[2] + _cov2D_vec[5]) / 2.0;
+          } else if (_keypoints_list_openpose[2].y > 0) {
+            v_sho = _keypoints_list_openpose[2].y;
+            cov2D_SHO = _cov2D_vec[2];
+          } else {
+            v_sho = _keypoints_list_openpose[5].y;
+            cov2D_SHO = _cov2D_vec[5];
+          }
+          float variance_shoY = cov2D_SHO(1, 1);
+
+          float v_hip_tmp;
+          float v_hip;
+          Eigen::Matrix2f cov2D_HIP;
+          if (_keypoints_list_openpose[8].y > 0 && _keypoints_list_openpose[11].y > 0) {
+            v_hip_tmp =
+                fabs(_keypoints_list_openpose[8].y - _keypoints_list_openpose[11].y) / 2.0f;
+            if (_keypoints_list_openpose[8].y < _keypoints_list_openpose[11].y) {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[8].y;
+            } else {
+              v_hip = v_hip_tmp + _keypoints_list_openpose[11].y;
+            }
+            cov2D_HIP = (_cov2D_vec[11] + _cov2D_vec[8]) / 2.0;
+          } else if (_keypoints_list_openpose[8].y > 0) {
+            v_hip = _keypoints_list_openpose[8].y;
+            cov2D_HIP = _cov2D_vec[8];
+          } else {
+            v_hip = _keypoints_list_openpose[11].y;
+            cov2D_HIP = _cov2D_vec[11];
+          }
+          float variance_hipY = cov2D_HIP(1, 1);
+
+          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+
+          // cout << "Z---------->    " << Z << endl;
+
+          for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
+            Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
+            if (!(cov2D_TMP.array() == -1).all()) {
+              Eigen::Matrix<float, 3, 2> J;
+              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+
+              float variance_z_Hp =
+                  pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
+              float variance_z_sho =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_shoY;
+              float variance_z_hip =
+                  pow(_fy * Hp / pow(v_hip - v_sho, 2), 2) * variance_hipY;
+              float variance_z =
+                  variance_z_Hp + variance_z_sho + variance_z_hip;
+
+              Eigen::Matrix3f covMatrixZ;
+              covMatrixZ << 0, 0, 0, 0, 0, 0, 0, 0, variance_z;
+
+              Eigen::Matrix3f covMatrix3D =
+                  J * cov2D_TMP * J.transpose() + covMatrixZ;
+              _cov3D_vec.push_back(covMatrix3D);
+              _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
+            } else {
+              Eigen::Matrix3f covMatrixZ_NaN;
+              covMatrixZ_NaN.setConstant(-1);
+              _cov3D_vec.push_back(covMatrixZ_NaN);
+              _cov3D[keypoints_map_openpose[i]] = covMatrixZ_NaN; // store the 3D covariance matrix in the map
+            }
+          }
+        }
+      }
+      return return_type::success;
+    } 
+    else {
       cout << "\033[1;31mUnknown video source type. Cannot compute 3D covariance.\033[0m" << endl;
       return return_type::error;
     }
-  
   }
 
   /**
@@ -2602,7 +2936,11 @@ public:
   // Implement the actual functionality here
   return_type get_output(json &out, std::vector<unsigned char> *blob = nullptr) override {
 
+    
     out.clear();
+
+    auto start_get_output = std::chrono::high_resolution_clock::now();
+    auto time_prev = std::chrono::high_resolution_clock::now();
 
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
 
@@ -2621,34 +2959,78 @@ public:
     // Update frame timestamp after acquiring frame
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
-    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
+    auto time_now = std::chrono::high_resolution_clock::now();
+    auto duration_acquire_frame = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
+    #ifdef KINECT_AZURE_LIBS
+    if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
+      // It should never hit timeout when K4A_WAIT_INFINITE is set.
+      cout << "Error! Add capture to tracker process queue timeout!" << endl;
       return return_type::error;
-    }
-    
-    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
-      return return_type::error;
-    }
+    } 
+    #endif
+
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_skeleton_call = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
 
     if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
       return return_type::error;
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_skeleton_rgb = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
     if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
       return return_type::error;
     }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_hessian = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
 
     if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
       return return_type::error;
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
+    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_skeleton_depth = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
+    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
+      return return_type::error;
+    }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_point_cloud_filter = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
     if (coordinate_transform(_params["debug"]["coordinate_transform"]) == return_type::error) {
       return return_type::error;
     }
+
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_coordinate_transform = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
 
     if (viewer(_params["debug"]["viewer"]) == return_type::error) {
       return return_type::error;
     }
     
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_viewer = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
 
     // Prepare output 
     // the json definition is on the google doc: https://docs.google.com/document/d/1IRs9VA9gGh8CmGIK8cRInYrMCY8cF8FMGC5H8DoonJI
@@ -2706,12 +3088,35 @@ public:
       }
     }
 
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_output_prepare = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+
     // clear the fields for the next frame
     _skeleton2D.clear();
     _skeleton3D.clear(); 
     _cov3D.clear();
     _cov2D_vec.clear();
     _cov3D_vec.clear();
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_output_clear = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    auto duration_get_output = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - start_get_output);
+
+    if (_params["debug"]["check_computation_time"]) {
+      cout << "Acquire frame: " << duration_acquire_frame.count() << " milliseconds" << endl;
+      cout << "Skeleton call: " << duration_skeleton_call.count() << " milliseconds" << endl;
+      cout << "Skeleton rgb: " << duration_skeleton_rgb.count() << " milliseconds" << endl;
+      cout << "Hessian compute: " << duration_hessian.count() << " milliseconds" << endl;
+      cout << "Cov compute: " << duration_cov.count() << " milliseconds" << endl;
+      cout << "Skeleton depth: " << duration_skeleton_depth.count() << " milliseconds" << endl;
+      cout << "Point cloud filter: " << duration_point_cloud_filter.count() << " milliseconds" << endl;
+      cout << "Coordinate transform: " << duration_coordinate_transform.count() << " milliseconds" << endl;
+      cout << "Viewer: " << duration_viewer.count() << " milliseconds" << endl;
+      cout << "Output prepare: " << duration_output_prepare.count() << " milliseconds" << endl;
+      cout << "Output clear: " << duration_output_clear.count() << " milliseconds" << endl;
+      cout << "\033[1;33mGET OUTPUT TIME: " << duration_get_output.count() << " milliseconds\033[0m" << endl;
+    }
 
     return return_type::success;
   }
@@ -2745,7 +3150,7 @@ public:
       return;
     }
 
-    if (setup_camera_extrinsics(_params["debug"]["coordinate_transform"]) == return_type::error) {
+    if (setup_camera_extrinsics(_params["calibration_mode"],_params["debug"]["coordinate_transform"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
       return;
     }
@@ -2754,8 +3159,10 @@ public:
     setup_Pipeline();
 
     // Show _rgb and _rgbd images in two separate windows contempouraneously
-    cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
-    cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+    if (_params["debug"]["viewer"]) {
+      cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
+      cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
+    }
 
   } 
 
@@ -2771,7 +3178,7 @@ protected:
 
   string _agent_id; /**< the agent ID */
   string _model_file; /**< the model file path */
-  chrono::steady_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
+  chrono::system_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
   int _camera_device = 0;
   data_t _fps = 25;
   
@@ -2853,7 +3260,7 @@ protected:
   vector<HumanPose> _poses_openpose; /**<  contains all the keypoints of all identified people */
 
   int _global_frame_counter = 0; /**< global frame counter for dummy */
-  map<int, chrono::steady_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
+  map<int, chrono::system_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
 
 };
 
