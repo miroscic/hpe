@@ -2606,8 +2606,16 @@ public:
 
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
 
+/* 
     if (acquire_frame(_params["debug"]["acquire_frame"]) == return_type::error) {
       return return_type::error;
+    }
+*/
+    const bool dummy = _params.value("dummy", false);
+
+    if (!dummy) {
+        if (acquire_frame(true) == return_type::error)
+            return return_type::error;
     }
 
     // Update frame timestamp after acquiring frame
@@ -2873,6 +2881,64 @@ For testing purposes, when directly executing the plugin
 */
 int main(int argc, char const *argv[]) {
   HpePlugin plugin;
+
+  return_type rt = return_type::success;
+  try {
+
+    // Aprire il file JSON in lettura
+    ifstream file("params.json");
+
+    if (!file.is_open()) {
+      cerr << "Errore: Impossibile aprire il file." << endl;
+      return 1;
+    }
+
+    // Leggere il contenuto del file JSON
+    json params;
+    file >> params;
+    file.close();
+
+    plugin.set_params(&params);
+
+    json output = {};
+
+    auto start_time = high_resolution_clock::now();
+    int frame_count = 0;
+    double fps = 0.0;
+
+    while ((rt = plugin.get_output(output)) != return_type::error) {
+      if (rt == return_type::warning) {
+        cout << endl << "*** Warning: no result." << endl;
+      } else {
+        // cout << "Output: " << output.dump() << endl;
+      }
+
+      frame_count++;
+
+      auto now = high_resolution_clock::now();
+      auto duration =
+          duration_cast<seconds>(now - start_time).count(); // Durata in secondi
+
+      // Every second calculate FPS and reset timer
+      if (duration >= 1) {
+        fps = frame_count / duration;
+        cout << "-----------------> FPS: " << fps << endl;
+
+        start_time = now;
+        frame_count = 0;
+      }
+    }
+
+    cout << endl;
+  } catch (const exception &error) {
+    cerr << error.what() << endl;
+    return 1;
+  }
+
+  return 0;
+
+
+  /* 
   json output, params;
 
   // Set example values to params
@@ -2888,4 +2954,5 @@ int main(int argc, char const *argv[]) {
   cout << "Output: " << output << endl;
 
   return 0;
+  */
 }

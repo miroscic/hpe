@@ -4,17 +4,17 @@
     "model_file": "models/human-pose-estimation-0001.xml",
     "resolution_rgb": "1280x720",
     "fps": 25,
-    "dummy": true,
-    "filter_point_cloud": true,
+    "dummy": false,
+    "filter_point_cloud": false,
     "debug": {
-        "setup_video_capture": true,
-        "skeleton_from_depth_compute": true,
+        "setup_video_capture": false,
+        "skeleton_from_depth_compute": false,
         "skeleton_from_rgb_compute": true,
         "hessian_compute": true,
-        "cov3D_compute": true,
+        "cov3D_compute": false,
         "consistency_check": false,
         "point_cloud_filter": false,
-        "coordinate_transfrom": false,
+        "coordinate_transform": false,
         "viewer": true
       }
 }
