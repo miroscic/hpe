@@ -742,7 +742,7 @@ public:
       #ifdef __linux
 
       std::ifstream cpuinfo("/proc/cpuinfo");
-      std::string line;
+      std::string line, serial;
 
       while (std::getline(cpuinfo, line)) {
           if (line.find("Serial") != std::string::npos) {
@@ -1180,10 +1180,8 @@ public:
     _camera_transformation_matrix = Eigen::Matrix4f::Identity();
     
     // Check if camera serial number is provided in params
-    if (debug) {
-      cout << "\033[1;34mSetup camera extrinsics for camera serial: SN" << _agent_id << "\033[0m" << endl;
-    }
-    
+    cout << "\033[1;34mSetup camera extrinsics for camera serial: SN" << _agent_id << "\033[0m" << endl;
+
     // Check if transformation parameters exist for this camera serial
     if (!calibration_mode && _params.contains("SN" + _agent_id)) {
       auto camera_params = _params["SN" + _agent_id];
@@ -1212,12 +1210,10 @@ public:
       
       // Check if rotation matrix is valid
       if (!is_valid_rotation_matrix(R_input)) {
-        if (debug) {
-          cout << "\033[1;33mWarning: Rotation matrix is not perfectly orthonormal\033[0m" << endl;
-        }
+        cout << "\033[1;33mWarning: Rotation matrix is not perfectly orthonormal\033[0m" << endl;
         // Normalize using SVD
         R_input = normalize_rotation_matrix(R_input, debug);
-      } else if (debug) {
+      } else {
         cout << "\033[1;32mRotation matrix is orthonormal and valid\033[0m" << endl;
       }
       
@@ -1231,10 +1227,8 @@ public:
                                       R_input(2,0), R_input(2,1), R_input(2,2), Tz,
                                       0.0f, 0.0f, 0.0f, 1.0f;
       
-      if (debug) {
-        cout << "\033[1;32mLoaded camera transformation matrix for SN" << _agent_id << "\033[0m" << endl;
-        cout << _camera_transformation_matrix << endl;
-      }
+      cout << "\033[1;32mLoaded camera transformation matrix for SN" << _agent_id << "\033[0m" << endl;
+      cout << _camera_transformation_matrix << endl;
     } else {
 
         if (calibration_mode)
@@ -2279,67 +2273,52 @@ public:
    */
   return_type skeleton_from_rgb_compute(bool debug = false) {
 
-    if (_video_source != UNKNOWN){
-      
+    if (_video_source != UNKNOWN) {
+
       // Check if pipeline is valid
       if (!_pipeline) {
         cout << "\033[1;31mError: Pipeline is not initialized\033[0m" << endl;
         return return_type::error;
       }
-      
+
       if (_pipeline->isReadyToProcess()) {
         if (_rgb.empty()) {
           cout << "\033[1;31mError: RGB image is empty\033[0m" << endl;
           return return_type::error;
         }
 
-        _frame_num = _pipeline->submitData(ImageInputData(_rgb), make_shared<ImageMetaData>(_rgb, _frame_time));
+        _frame_num = _pipeline->submitData(
+            ImageInputData(_rgb),
+            make_shared<ImageMetaData>(_rgb, _frame_time));
       } else {
-        cout << "\033[1;33mWarning: Pipeline is not ready to process\033[0m" << endl;
+        cout << "\033[1;33mWarning: Pipeline is not ready to process\033[0m"
+             << endl;
         return return_type::warning;
       }
 
-      // Implement a simple timeout mechanism
-      auto start_time = std::chrono::steady_clock::now();
-      const auto timeout_duration = std::chrono::seconds(10); // 10 second timeout
-      
-      try {
-        // Try to wait for data with a manual timeout check
-        while (true) {
-          auto current_time = std::chrono::steady_clock::now();
-          if (current_time - start_time > timeout_duration) {
-            cout << "\033[1;31mTimeout waiting for pipeline data (10 seconds)\033[0m" << endl;
-            return return_type::error;
-          }
-          
-          // Check if data is available
-          _result = _pipeline->getResult();
-          if (_result) {
-            break;
-          }
-          
-          // Small sleep to avoid busy waiting
-          std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        }
-        
-      } catch (const std::exception& e) {
-        cout << "\033[1;31mException in getting pipeline result: " << e.what() << "\033[0m" << endl;
-        return return_type::error;
+      // Waiting for free input slot or output data available. Function will
+      // return immediately if any of them are available.
+      _pipeline->waitForData();
+      if (!(_result = _pipeline->getResult())) {
+        return return_type::warning;
       }
 
       if (debug) {
         try {
-          _rgb = renderHumanPose(_result->asRef<HumanPoseResult>(), _output_transform);
-        } catch (const std::exception& e) {
-          cout << "\033[1;33mWarning: Failed to render pose: " << e.what() << "\033[0m" << endl;
+          _rgb = renderHumanPose(_result->asRef<HumanPoseResult>(),
+                                 _output_transform);
+        } catch (const std::exception &e) {
+          cout << "\033[1;33mWarning: Failed to render pose: " << e.what()
+               << "\033[0m" << endl;
         }
       }
       _frames_processed++;
-    
-    return return_type::success;
-    }
-    else{
-      cout << "\033[1;31mUnknown video source type. Cannot compute skeleton from RGB.\033[0m" << endl;
+
+      return return_type::success;
+    } else {
+      cout << "\033[1;31mUnknown video source type. Cannot compute skeleton "
+              "from RGB.\033[0m"
+           << endl;
       return return_type::error;
     }
   }
