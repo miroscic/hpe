@@ -3101,7 +3101,7 @@ public:
     auto duration_output_clear = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     auto duration_get_output = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - start_get_output);
 
-    if (_params["debug"]["check_computation_time"]) {
+    if (_params["debug"].value("check_computation_time", false)) {
       cout << "Acquire frame: " << duration_acquire_frame.count() << " milliseconds" << endl;
       cout << "Skeleton call: " << duration_skeleton_call.count() << " milliseconds" << endl;
       cout << "Skeleton rgb: " << duration_skeleton_rgb.count() << " milliseconds" << endl;
@@ -3135,7 +3135,7 @@ public:
       _fps = _params["fps"];
     }
 
-    set_video_source(_params["dummy"]);
+    set_video_source(_params.value("dummy", false));
     cout << "\033[1;32mVideo source: " << video_source_to_string(_video_source) << "\033[0m" << endl;
     if (_params.contains("model_file")) {
       _model_file = _params["model_file"];
@@ -3148,7 +3148,7 @@ public:
       return;
     }
 
-    if (setup_camera_extrinsics(_params["calibration_mode"],_params["debug"]["coordinate_transform"]) == return_type::error) {
+    if (setup_camera_extrinsics(_params.value("calibration_mode", false),_params["debug"]["coordinate_transform"]) == return_type::error) {
       cout << "\033[1;31mFailed to setup camera extrinsics\033[0m" << endl;
       return;
     }
@@ -3157,7 +3157,7 @@ public:
     setup_Pipeline();
 
     // Show _rgb and _rgbd images in two separate windows contempouraneously
-    if (_params["debug"]["viewer"]) {
+    if (_params["debug"].value("viewer", false)) {
       cv::namedWindow("RGB Frame", cv::WINDOW_NORMAL);
       cv::namedWindow("RGBD Frame", cv::WINDOW_NORMAL);
     }
