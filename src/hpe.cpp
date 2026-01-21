@@ -2008,7 +2008,7 @@ public:
    * @author Nicola
    * @return result status ad defined in return_type
    */
-  return_type skeleton_from_depth_compute(bool debug = false) {
+  return_type skeleton_3D_compute(bool debug = false) {
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       #ifdef KINECT_AZURE_LIBS
@@ -2046,14 +2046,13 @@ public:
           
         }
 
-        // Map the 3D keypoints to the 2D keypoints
+        // Map the Azure keypoints to the openpose keypoints
         for (int i = 0; i < 18; ++i) {
           std::string keypoint_name_tmp = keypoints_map_openpose[i];
           for (const auto &[index, keypoint_azure_name] : keypoints_map_azure) {
             if (keypoint_azure_name == keypoint_name_tmp) {
               k4a_float3_t position = body.skeleton.joints[index].position;
-              _keypoints_list_azure[i] =
-                  cv::Point3f(position.v[0], position.v[1], position.v[2]);
+              _keypoints_list_azure[i] = cv::Point3f(position.v[0], position.v[1], position.v[2]);
               break;
             }
           }
@@ -2078,8 +2077,31 @@ public:
         cout << "Error! Pop body frame result time out!" << endl;
         return return_type::error;
       }
+
       #endif  
 
+    }else if ( _video_source == RASPI_RGB_CAMERA || _video_source == RGB_CAMERA){
+    
+      // if no bodies are detected skip this 
+      if (_keypoints_list_openpose.size() == 0) 
+        return return_type::retry;
+      
+
+      for (const auto &[index, keypoint_name] : keypoints_map_openpose) {
+        float u = _keypoints_list_openpose[index].x;
+        float v = _keypoints_list_openpose[index].y;
+
+        float x_mm = (u - _cx) * _Z_mm / _fx;
+        float y_mm = (v - _cy) * _Z_mm / _fy;
+
+        vector<float> keypoint_data;
+        keypoint_data.push_back(x_mm);
+        keypoint_data.push_back(y_mm);
+        keypoint_data.push_back(_Z_mm);
+
+        _skeleton3D[keypoint_name] = keypoint_data;   
+      }
+      
     }
   
     return return_type::success;
@@ -2621,7 +2643,7 @@ public:
         output_file << json_cov3D_vec.dump(4);
         output_file.close();
       }
-      #endif
+      #endif 
 
       return return_type::success;
     }
@@ -2698,7 +2720,7 @@ public:
           }
           float variance_hipY = cov2D_HIP(1, 1);
 
-          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+          _Z_mm = (_fy * Hp) / fabs(v_hip - v_sho);
 
           // cout << "Z---------->    " << Z << endl;
 
@@ -2706,7 +2728,7 @@ public:
             Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
             if (!(cov2D_TMP.array() == -1).all()) {
               Eigen::Matrix<float, 3, 2> J;
-              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+              J << _Z_mm / _fx, 0, 0, _Z_mm / _fy, 0, 0;
 
               float variance_z_Hp =
                   pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
@@ -2739,24 +2761,13 @@ public:
 
     else if (_video_source == RGB_CAMERA || _video_source == RGB_CAMERA_DUMMY){
 
-      // RGB Camera Intrinsic parameters
-      // TODO: Calibrate RGB Camera and take intrinsic param from INI
-      float f_mm =
-          6; // focal length in mm
-             // https://grobotronics.com/raspberry-pi-hq-camera-lens-6mm-wide-angle.html?sl=en
-      // Sensor dimensions:
-      float d_x = (4056 * 1.55) /
-                  1000; // https://www.waveshare.com/wiki/Raspberry_Pi_HQ_Camera
-      float d_y = (3040 * 1.55) / 1000;
+      // Azure RGB Camera Intrinsic parameters
 
-      int H = _rgb.rows; // image size after resize
-      int W = _rgb.cols;
+      _fx = 505.33; // focal length in pixel
+      _fy = 505.48; // focal length in pixel
 
-      _fx = (f_mm * W) / d_x; // focal length in pixel
-      _fy = (f_mm * H) / d_y; // focal length in pixel
-
-      _cx = W / 2; // coordinate of the principal point
-      _cy = H / 2;
+      _cx = 319.49; // coordinate of the principal point
+      _cy = 326.69;
 
       float Hp =
           500; // Real "height" of the selected person in mm between nec and hip
@@ -2810,15 +2821,15 @@ public:
           }
           float variance_hipY = cov2D_HIP(1, 1);
 
-          float Z = (_fy * Hp) / fabs(v_hip - v_sho);
+          float _Z_mm = (_fy * Hp) / fabs(v_hip - v_sho);
 
-          // cout << "Z---------->    " << Z << endl;
+          // cout << "_Z_mm---------->    " << _Z_mm << endl;
 
           for (size_t i = 0; i < _cov2D_vec.size(); ++i) {
             Eigen::Matrix2f cov2D_TMP = _cov2D_vec[i];
             if (!(cov2D_TMP.array() == -1).all()) {
               Eigen::Matrix<float, 3, 2> J;
-              J << Z / _fx, 0, 0, Z / _fy, 0, 0;
+              J << _Z_mm / _fx, 0, 0, _Z_mm / _fy, 0, 0;
 
               float variance_z_Hp =
                   pow(_fy / fabs(v_hip - v_sho), 2) * pow(sigmaHp, 2);
@@ -2942,11 +2953,6 @@ public:
 
     if (!_agent_id.empty()) out["agent_id"] = _agent_id;
 
-/* 
-    if (acquire_frame(_params["debug"]["acquire_frame"]) == return_type::error) {
-      return return_type::error;
-    }
-*/
     const bool dummy = _params.value("dummy", false);
 
     if (!dummy) {
@@ -2997,10 +3003,11 @@ public:
     auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
 
-    if (skeleton_from_depth_compute(_params["debug"]["skeleton_from_depth_compute"]) == return_type::error) {
+    if (skeleton_3D_compute(_params["debug"]["skeleton_3D_compute"]) == return_type::error)
+    {
       return return_type::error;
     }
-    
+
     time_now = std::chrono::high_resolution_clock::now();
     auto duration_skeleton_depth = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
@@ -3039,50 +3046,37 @@ public:
 
     // Prepare the output json
     if (_poses_openpose.size() > 0) {
-      out["typ"] = "3D";
+
+      if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
+        out["typ"] = "3D";
+      } else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
+                   _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
+        out["typ"] = "2D";
+      } else {
+        cout << "\033[1;31mUnknown video source type. Cannot prepare output.\033[0m" << endl;
+        return return_type::error;
+      }
+
       for (int kp = 0; kp < _keypoints_list_openpose.size(); kp++) {
+
+        //_keypoints_list_openpose[kp].x and _keypoints_list_openpose[kp].y are in pixels and they cannot be negative! We check if the keypoint exists 
         if (_keypoints_list_openpose[kp].x < 0 || _keypoints_list_openpose[kp].y < 0)
           continue;
         
-        if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
-          
-          out["joints"][keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
+        out["joints"][keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
 
-          out["joints"][keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
-         
-          out["joints"][keypoints_map_openpose[kp]]["unc"] = 
-            {
-              _cov3D[keypoints_map_openpose[kp]](0, 0),   // Ux
-              _cov3D[keypoints_map_openpose[kp]](1, 1),   // Uy
-              _cov3D[keypoints_map_openpose[kp]](2, 2),   // Uz
-              _cov3D[keypoints_map_openpose[kp]](0, 1),   // Uxy
-              _cov3D[keypoints_map_openpose[kp]](0, 2),   // Uxz
-              _cov3D[keypoints_map_openpose[kp]](1, 2)    // Uyz
-            }; 
-
-        } 
-        else if (_video_source == RGB_CAMERA || _video_source == RASPI_RGB_CAMERA ||
-                   _video_source == RGB_CAMERA_DUMMY || _video_source == RASPI_RGB_CAMERA_DUMMY) {
-            //used ony RGB inference
-
-            //TODO: CONVERTIRE I PUNTI IN 3D!!!! Usare la matrice di calibrazione (ALE LUCHETTI)
-            
-            out["typ"] = "2D";
-
-            out[keypoints_map_openpose[kp]]["crd"] = {
-              _keypoints_list_openpose[kp].x,
-              _keypoints_list_openpose[kp].y};
-
-            out[keypoints_map_openpose[kp]]["unc"] = {
-              _keypoints_cov_openpose[kp].x,
-              _keypoints_cov_openpose[kp].y,
-              _keypoints_cov_openpose[kp].z
-            };
-        }
-        else {
-          cout << "\033[1;31mUnknown video source type. Cannot prepare output.\033[0m" << endl;
-          return return_type::error;
-        }
+        out["joints"][keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
+        
+        out["joints"][keypoints_map_openpose[kp]]["unc"] = 
+          {
+            _cov3D[keypoints_map_openpose[kp]](0, 0),   // Ux
+            _cov3D[keypoints_map_openpose[kp]](1, 1),   // Uy
+            _cov3D[keypoints_map_openpose[kp]](2, 2),   // Uz
+            _cov3D[keypoints_map_openpose[kp]](0, 1),   // Uxy
+            _cov3D[keypoints_map_openpose[kp]](0, 2),   // Uxz
+            _cov3D[keypoints_map_openpose[kp]](1, 2)    // Uyz
+          }; 
+      
       }
     }
 
@@ -3227,6 +3221,7 @@ protected:
   float _cy; /**< the camera principal point y coordinate */
   float _fx; /**< the camera focal length x coordinate */
   float _fy; /**< the camera focal length y coordinate */
+  float _Z_mm;  /**< estimate distance with RGB*/
   Eigen::Matrix4f _camera_transformation_matrix; /**< the camera transformation matrix for coordinate system transformation */
 
   string _resolution_rgb = ""; /**< the resolution of the RGB frame in the format "widthxheight" */

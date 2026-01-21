@@ -8,7 +8,7 @@
     "filter_point_cloud": false,
     "debug": {
         "setup_video_capture": false,
-        "skeleton_from_depth_compute": false,
+        "skeleton_3D_compute": false,
         "skeleton_from_rgb_compute": true,
         "hessian_compute": true,
         "cov3D_compute": false,
