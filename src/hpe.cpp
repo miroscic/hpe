@@ -1109,6 +1109,51 @@ public:
 
   /* Setup camera extrinsics from parameters
   */
+  /**
+   * Normalize rotation matrix using SVD decomposition
+   * Ensures the rotation matrix is orthonormal and has determinant = 1
+   * @param R_input 3x3 rotation matrix (may be slightly distorted)
+   * @return Corrected orthonormal rotation matrix
+   */
+  Eigen::Matrix3f normalize_rotation_matrix(const Eigen::Matrix3f& R_input, bool debug = false) {
+    // Perform SVD decomposition: R = U * Sigma * V^T
+    Eigen::JacobiSVD<Eigen::Matrix3f> svd(R_input, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    
+    // Reconstruct orthonormal matrix: R_corrected = U * V^T
+    Eigen::Matrix3f R_corrected = svd.matrixU() * svd.matrixV().transpose();
+    
+    // Ensure determinant = 1 (not -1, which would indicate a reflection)
+    if (R_corrected.determinant() < 0) {
+      R_corrected.col(2) *= -1;
+    }
+    
+    if (debug) {
+      float error = (R_input - R_corrected).norm();
+      cout << "\033[1;36mRotation matrix normalization error: " << error << "\033[0m" << endl;
+      if (error > 0.01f) {
+        cout << "\033[1;33mWarning: Rotation matrix had significant distortion, corrected by SVD\033[0m" << endl;
+      }
+    }
+    
+    return R_corrected;
+  }
+
+  /**
+   * Check if rotation matrix is orthonormal
+   * @param R 3x3 rotation matrix
+   * @return true if matrix is valid (det(R)=1, R*R^T=I), false otherwise
+   */
+  bool is_valid_rotation_matrix(const Eigen::Matrix3f& R, float tolerance = 0.01f) {
+    // Check if R * R^T = I (orthonormality)
+    Eigen::Matrix3f identity_check = R * R.transpose();
+    Eigen::Matrix3f identity = Eigen::Matrix3f::Identity();
+    
+    // Check determinant is 1 (no reflection)
+    float det = R.determinant();
+    
+    return (identity_check - identity).norm() < tolerance && std::abs(det - 1.0f) < tolerance;
+  }
+
   return_type setup_camera_extrinsics(bool calibration_mode = false, bool debug = false) {
     // Setup camera extrinsics if provided in parameters
     
@@ -1140,14 +1185,31 @@ public:
       float Ty = camera_params.contains("Ty") ? camera_params["Ty"].get<float>() : 0.0f;
       float Tz = camera_params.contains("Tz") ? camera_params["Tz"].get<float>() : 0.0f;
       
+      // Construct rotation matrix and validate/normalize it
+      Eigen::Matrix3f R_input;
+      R_input << Rxx, Rxy, Rxz,
+                 Ryx, Ryy, Ryz,
+                 Rzx, Rzy, Rzz;
+      
+      // Check if rotation matrix is valid
+      if (!is_valid_rotation_matrix(R_input)) {
+        if (debug) {
+          cout << "\033[1;33mWarning: Rotation matrix is not perfectly orthonormal\033[0m" << endl;
+        }
+        // Normalize using SVD
+        R_input = normalize_rotation_matrix(R_input, debug);
+      } else if (debug) {
+        cout << "\033[1;32mRotation matrix is orthonormal and valid\033[0m" << endl;
+      }
+      
       // Build the 4x4 transformation matrix
       // [Rxx Rxy Rxz Tx]
       // [Ryx Ryy Ryz Ty]
       // [Rzx Rzy Rzz Tz]
       // [ 0   0   0   1]
-      _camera_transformation_matrix << Rxx, Rxy, Rxz, Tx,
-                                      Ryx, Ryy, Ryz, Ty,
-                                      Rzx, Rzy, Rzz, Tz,
+      _camera_transformation_matrix << R_input(0,0), R_input(0,1), R_input(0,2), Tx,
+                                      R_input(1,0), R_input(1,1), R_input(1,2), Ty,
+                                      R_input(2,0), R_input(2,1), R_input(2,2), Tz,
                                       0.0f, 0.0f, 0.0f, 1.0f;
       
       if (debug) {
