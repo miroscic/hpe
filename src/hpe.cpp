@@ -351,6 +351,10 @@ public:
   }
 
   bool is_raspberry_pi() {
+
+#ifndef __linux
+    return false;
+#else
     // Check if the platform is a Raspberry Pi
     ifstream cpuinfo("/proc/cpuinfo");
     string line;
@@ -360,6 +364,7 @@ public:
       }
     }
     return false;
+#endif
   }
 
   bool is_rgb_camera_connected() {
@@ -735,6 +740,20 @@ public:
       // _camera.options->framerate = 25;
       // _camera.options->verbose = false;
       #ifdef __linux
+
+      std::ifstream cpuinfo("/proc/cpuinfo");
+      std::string line;
+
+      while (std::getline(cpuinfo, line)) {
+          if (line.find("Serial") != std::string::npos) {
+            serial = line.substr(line.find(":") + 2);
+            serial.erase(remove_if(serial.begin(), serial.end(), ::isspace), serial.end());
+            break;
+          }
+      }
+
+      _agent_id = serial;
+
       _raspi_rgb_camera.startVideo();
 
       do
