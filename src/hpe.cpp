@@ -3040,11 +3040,11 @@ public:
         
         if (_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY) {
           
-          out[keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
+          out["joints"][keypoints_map_openpose[kp]]["ncm"] = 1; // number of cameras used, constantantly 1 for one HPE plugin
 
-          out[keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
+          out["joints"][keypoints_map_openpose[kp]]["crd"] = _skeleton3D[keypoints_map_openpose[kp]];
          
-          out[keypoints_map_openpose[kp]]["unc"] = 
+          out["joints"][keypoints_map_openpose[kp]]["unc"] = 
             {
               _cov3D[keypoints_map_openpose[kp]](0, 0),   // Ux
               _cov3D[keypoints_map_openpose[kp]](1, 1),   // Uy
