@@ -2012,7 +2012,7 @@ public:
       if (_body_frame != nullptr) {
         if (_body_frame.get_num_bodies() == 0) {
           //cout << "\033[1;34mNo bodies detected in the frame.\033[0m" << endl;
-          return return_type::error;
+          return return_type::retry;
         }
         
         // Only take one body (always the first one)
