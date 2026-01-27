@@ -1180,11 +1180,11 @@ public:
     _camera_transformation_matrix = Eigen::Matrix4f::Identity();
     
     // Check if camera serial number is provided in params
-    cout << "\033[1;34mSetup camera extrinsics for camera serial: SN" << _agent_id << "\033[0m" << endl;
+    cout << "\033[1;34mSetup camera extrinsics for camera serial: " << _agent_id << "\033[0m" << endl;
 
     // Check if transformation parameters exist for this camera serial
-    if (!calibration_mode && _params.contains("SN" + _agent_id)) {
-      auto camera_params = _params["SN" + _agent_id];
+    if (!calibration_mode && _params.contains(_agent_id)) {
+      auto camera_params = _params[_agent_id];
       
       // Read rotation matrix components
       float Rxx = camera_params.contains("Rxx") ? camera_params["Rxx"].get<float>() : 1.0f;
@@ -1227,14 +1227,14 @@ public:
                                       R_input(2,0), R_input(2,1), R_input(2,2), Tz,
                                       0.0f, 0.0f, 0.0f, 1.0f;
       
-      cout << "\033[1;32mLoaded camera transformation matrix for SN" << _agent_id << "\033[0m" << endl;
+      cout << "\033[1;32mLoaded camera transformation matrix for " << _agent_id << "\033[0m" << endl;
       cout << _camera_transformation_matrix << endl;
     } else {
 
         if (calibration_mode)
           cout << "\033[1;33mCalibration mode active, using the identity matrix\033[0m" << endl;
         else
-          cout << "\033[1;33mWarning: No transformation parameters found for camera serial SN" << _agent_id << ", using identity matrix\033[0m" << endl;
+          cout << "\033[1;33mWarning: No transformation parameters found for camera serial " << _agent_id << ", using identity matrix\033[0m" << endl;
 
       return return_type::warning;
     }
@@ -3128,6 +3128,10 @@ public:
   void set_params(void const *params) override {
     Source::set_params(params);
     _params.merge_patch(*(json *)params);
+
+    if (_params.contains("agent_id")) {
+      _agent_id = _params["agent_id"];
+    }
 
     if (_params.contains("resolution_rgb")) {
       _resolution_rgb = _params["resolution_rgb"];
