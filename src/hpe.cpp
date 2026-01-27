@@ -13,33 +13,43 @@
 # NOTICE: MADS Version 1.3.1
 */
 
-// Mandatory included headers
-#include <source.hpp>
-#include <nlohmann/json.hpp>
-#include <pugg/Kernel.h>
+#ifndef NO_HEADER
+  // Mandatory included headers
+  #include <source.hpp>
+  #include <nlohmann/json.hpp>
+  #include <pugg/Kernel.h>
 
-// other includes as needed here
-#include <chrono>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <opencv2/core.hpp>
-#include <opencv2/opencv.hpp>
-#include <string>
-#include <thread>
+  // other includes as needed here
+  #include <chrono>
+  #include <filesystem>
+  #include <fstream>
+  #include <iomanip>
+  #include <iostream>
+  #include <opencv2/core.hpp>
+  #include <opencv2/opencv.hpp>
+  #include <string>
+  #include <thread>
 
-#include <pcl/console/parse.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/visualization/pcl_visualizer.h>
+  #include <pcl/console/parse.h>
+  #include <pcl/io/pcd_io.h>
+  #include <pcl/visualization/pcl_visualizer.h>
 
-#include <Eigen/Dense>
-#include <models/hpe_model_openpose.h>
-#include <models/input_data.h>
-#include <openvino/openvino.hpp>
-#include <pipelines/async_pipeline.h>
-#include <pipelines/metadata.h>
-#include <utils/common.hpp>
+  #include <Eigen/Dense>
+  #include <models/hpe_model_openpose.h>
+  #include <models/input_data.h>
+  #include <openvino/openvino.hpp>
+  #include <pipelines/async_pipeline.h>
+  #include <pipelines/metadata.h>
+  #include <utils/common.hpp>
+  #ifdef KINECT_AZURE_LIBS
+    #pragma message("This computer has the Kinect Azure SDK installed.")
+    // include Kinect libraries
+    #include <k4a/k4a.h>
+    #include <k4a/k4a.hpp>
+    #include <k4abt.hpp>
+    #include <k4arecord/playback.h>
+  #endif
+#endif
 
 #ifdef __linux
 #include <lccv.hpp> // for Raspi
@@ -53,15 +63,6 @@
 #ifdef _WIN32
 #define _USE_MATH_DEFINES
 #include <cmath>
-#endif
-
-#ifdef KINECT_AZURE_LIBS
-#pragma message("This computer has the Kinect Azure SDK installed.")
-// include Kinect libraries
-#include <k4a/k4a.h>
-#include <k4a/k4a.hpp>
-#include <k4abt.hpp>
-#include <k4arecord/playback.h>
 #endif
 
 // Load the namespaces
@@ -238,7 +239,6 @@ public:
 
   // Destructor
   ~HpePlugin() {
-
     if(_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
         // Close and free Kinect Azure resources
@@ -1813,34 +1813,44 @@ public:
       _kinect_device.get_capture(&_k4a_rgbd_capture, std::chrono::milliseconds(K4A_WAIT_INFINITE));
 
       _k4a_color_image = _k4a_rgbd_capture.get_color_image();
-      
+
       // Validate the color image before transformation
-      if (!_k4a_color_image.is_valid()) {
+      if (!_k4a_color_image || !_k4a_color_image.is_valid()) {
         cout << "\033[1;31mError: Failed to get valid color image from capture in acquire_frame\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
 
       // Transform the color image into depth image coordinates before converting into cv::Mat
       _k4a_depth_image = _k4a_rgbd_capture.get_depth_image();
       
       // Validate the depth image before transformation
-      if (!_k4a_depth_image.is_valid()) {
+      if (!_k4a_depth_image || !_k4a_depth_image.is_valid()) {
         cout << "\033[1;31mError: Failed to get valid depth image from capture in acquire_frame\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
       
-      _k4a_color_image = transform_color_to_depth_coordinates(_kinect_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+      try {
+        _k4a_color_image = transform_color_to_depth_coordinates(_kinect_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
+      } catch (...) {
+        cout << "\033[1;31mError: Exception during color to depth transformation in acquire_frame\033[0m" << endl;
+        return return_type::retry;
+      }
+
+      if (!_k4a_color_image || !_k4a_color_image.is_valid()) {
+        cout << "\033[1;31mError: Transformed color image is invalid after transform in acquire_frame\033[0m" << endl;
+        return return_type::retry;
+      }
 
       // Convert k4a::image to cv::Mat --> color image
       if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
         cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
 
       // Convert k4a::image to cv::Mat --> depth image
       if (k4a_depth_image_to_cv_mat(_k4a_depth_image, _rgbd) != return_type::success) {
         cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
     
       #endif
@@ -1875,7 +1885,7 @@ public:
         exit(0); // Terminate the process
       } else if (stream_result != K4A_STREAM_RESULT_SUCCEEDED) {
         cout << "\033[1;31mFailed to get next capture from dummy file\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
 
       // Wrap the C handle in a C++ object
@@ -1884,7 +1894,7 @@ public:
       // Check if the capture is valid
       if (!_k4a_rgbd_capture) {
         cout << "\033[1;31mInvalid capture from dummy file\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
       
       _k4a_color_image = _k4a_rgbd_capture.get_color_image();
@@ -1897,14 +1907,14 @@ public:
       if (!_k4a_color_image.is_valid()) {
         cout << "\033[1;31mError: Failed to get valid color image from MKV file in acquire_frame\033[0m" << endl;
         cout << "\033[1;33mThis MKV file might not contain color stream data\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
       
       // Validate the depth image before transformation
       if (!_k4a_depth_image.is_valid()) {
         cout << "\033[1;31mError: Failed to get valid depth image from MKV file in acquire_frame\033[0m" << endl;
         cout << "\033[1;33mThis MKV file might not contain depth stream data\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
       
       _k4a_color_image = transform_color_to_depth_coordinates(_mkv_color_transformation_handle, _k4a_color_image, _k4a_depth_image);
@@ -1912,13 +1922,13 @@ public:
       // Convert k4a::image to cv::Mat --> color image
       if (k4a_color_image_to_cv_mat(_k4a_color_image, _rgb) != return_type::success) {
         cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
 
       // Convert k4a::image to cv::Mat --> depth image
       if (k4a_depth_image_to_cv_mat(_k4a_depth_image, _rgbd) != return_type::success) {
         cout << "\033[1;31mFailed to convert k4a::image to cv::Mat!\033[0m" << endl;
-        return return_type::error;
+        return return_type::retry;
       }
       
       // Debug section: save RGB and depth images
@@ -2956,8 +2966,10 @@ public:
     const bool dummy = _params.value("dummy", false);
 
     if (!dummy) {
-        if (acquire_frame(true) == return_type::error)
-            return return_type::error;
+      return_type rt = acquire_frame(_params["debug"]["acquire_frame"]);
+      if (rt != return_type::success) {
+        return rt;
+      }
     }
 
     // Update frame timestamp after acquiring frame
