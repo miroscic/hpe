@@ -2111,6 +2111,7 @@ public:
 
         _skeleton3D[keypoint_name] = keypoint_data;   
       }
+
       
     }
   
@@ -2779,8 +2780,7 @@ public:
       _cx = 319.49; // coordinate of the principal point
       _cy = 326.69;
 
-      float Hp =
-          500; // Real "height" of the selected person in mm between nec and hip
+      float Hp = 500; // Real "height" of the selected person in mm between nec and hip
       float sigmaHp = 2; // mm
 
       if (_keypoints_list_openpose.size() > 0) { // at least one person
@@ -2831,7 +2831,7 @@ public:
           }
           float variance_hipY = cov2D_HIP(1, 1);
 
-          float _Z_mm = (_fy * Hp) / fabs(v_hip - v_sho);
+          _Z_mm = (_fy * Hp) / fabs(v_hip - v_sho);
 
           // cout << "_Z_mm---------->    " << _Z_mm << endl;
 
