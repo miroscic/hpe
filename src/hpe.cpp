@@ -3125,9 +3125,9 @@ public:
     return return_type::success;
   }
 
-  void set_params(void const *params) override {
+  void set_params(const json &params) override {
     Source::set_params(params);
-    _params.merge_patch(*(json *)params);
+    _params.merge_patch(params);
 
     if (_params.contains("agent_id")) {
       _agent_id = _params["agent_id"];
@@ -3314,7 +3314,7 @@ int main(int argc, char const *argv[]) {
     file >> params;
     file.close();
 
-    plugin.set_params(&params);
+    plugin.set_params(params);
 
     json output = {};
 
