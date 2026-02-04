@@ -2586,6 +2586,7 @@ public:
             float sigma_z = -0.000000000035541*Z_tmp*Z_tmp*Z_tmp+0.000000493877878*Z_tmp*Z_tmp - 0.001100245600022*Z_tmp+1.989206937961068; // KINECT AZURE model
             float variance_z = sigma_z * sigma_z;
 
+
             Eigen::Matrix<float, 3, 2> J;
             J << Z_tmp / _fx, 0, 0, Z_tmp / _fy, 0, 0;
 
@@ -2594,6 +2595,9 @@ public:
 
             Eigen::Matrix3f covMatrix3D = J * _cov2D_vec_TMP * J.transpose() + covMatrixZ;
             _cov3D_vec.push_back(covMatrix3D);
+            
+            // DEBUG ONLY: mean of the x and y variances
+            covMatrix3D(2,2) = (covMatrix3D(0,0) + covMatrix3D(1,1))/2.0f;
             _cov3D[keypoints_map_openpose[i]] = covMatrix3D; // store the 3D covariance matrix in the map
           } else {
             Eigen::Matrix3f covMatrixZ_NaN;
