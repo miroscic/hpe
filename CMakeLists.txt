@@ -60,9 +60,9 @@ if(WIN32)
 else()
   find_path(OPENVINO_INCLUDE_DIR NAMES openvino.hpp 
     PATHS /opt/intel/openvino_2024.4.0/runtime/include
-    PATHS /opt/intel/openvino_2024.6.0/runtime/include
-    PATHS /opt/intel/openvino_2025.2.0/runtime/include
-    PATHS /opt/intel/openvino_2024.2.0/runtime/include
+    #PATHS /opt/intel/openvino_2024.6.0/runtime/include
+    #PATHS /opt/intel/openvino_2025.2.0/runtime/include
+    #PATHS /opt/intel/openvino_2024.2.0/runtime/include
     PATH_SUFFIXES openvino
   )
   cmake_path(GET OPENVINO_INCLUDE_DIR PARENT_PATH OPENVINO_INCLUDE_DIR)
