@@ -3248,8 +3248,8 @@ protected:
   int _rgb_height; /**< the height of the RGB frame */
   int _rgb_width; /**< the width of the RGB frame */
   VideoCapture _cap; /**< the OpenCV video capture object */
-  int _rgb_width_read = 1280;
-  int _rgb_height_read = 720;
+  int _rgb_width_read = 1024; //1280; //456; 
+  int _rgb_height_read = 768; //720; //256; 
 
   vector<cv::Point2i> _keypoints_list_openpose; /**< the 2D keypoints list for OpenPose */
   vector<cv::Point3f> _keypoints_cov_openpose; /**< the 2D covariance for OpenPose keypoints */

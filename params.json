@@ -9,7 +9,7 @@
     "filter_point_cloud": false,
     "calibration_mode": false,
     "debug": {
-        "check_computation_time": true,
+        "check_computation_time": false,
         "setup_video_capture": false,
         "skeleton_3D_compute": false,
         "skeleton_from_rgb_compute": false,
