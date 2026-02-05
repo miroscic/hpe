@@ -66,75 +66,17 @@ AsyncPipeline::~AsyncPipeline() {
     waitForTotalCompletion();
 }
 
-
 void AsyncPipeline::waitForData(bool shouldKeepOrder) {
     std::unique_lock<std::mutex> lock(mtx);
-
-    auto lambdaCalls = 0;
-auto time_start = std::chrono::high_resolution_clock::now();
-
-condVar.wait(lock, [&]() {
-    lambdaCalls++;
-
-    auto t1 = std::chrono::high_resolution_clock::now();
-
-    // Controlla ogni condizione separatamente
-    bool cbEx = (callbackException != nullptr);
-    auto t2 = std::chrono::high_resolution_clock::now();
-
-    bool idleReq = requestsPool->isIdleRequestAvailable();
-    auto t3 = std::chrono::high_resolution_clock::now();
-
-    bool compRes = shouldKeepOrder 
-                   ? (completedInferenceResults.find(outputFrameId) != completedInferenceResults.end())
-                   : (!completedInferenceResults.empty());
-    auto t4 = std::chrono::high_resolution_clock::now();
-
-    // Log temporaneo dei tempi (opzionale, per debug)
-    std::cout << "Lambda call " << lambdaCalls 
-              << ": cbEx=" << cbEx 
-              << " idleReq=" << idleReq 
-              << " compRes=" << compRes 
-              << " times (ms)="
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << ","
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count() << ","
-              << std::chrono::duration_cast<std::chrono::milliseconds>(t4-t3).count()
-              << std::endl;
-
-    return cbEx || idleReq || compRes;
-});
-
-auto time_end = std::chrono::high_resolution_clock::now();
-std::cout << "Thread actually waited for "
-          << std::chrono::duration_cast<std::chrono::milliseconds>(time_end - time_start).count()
-          << " ms" << std::endl;
-    /*
-    std::cout << "Thread BEFORE" << std::this_thread::get_id() << " waiting..." << std::endl;
-
-    auto time_now = std::chrono::high_resolution_clock::now();
-    auto time_prev = time_now;
-    bool a1 = shouldKeepOrder ? completedInferenceResults.find(outputFrameId) != completedInferenceResults.end()
-                                : !completedInferenceResults.empty();
-    
-int lambdaCalls = 0;
     condVar.wait(lock, [&]() {
-        lambdaCalls++;
         return callbackException != nullptr || requestsPool->isIdleRequestAvailable() ||
                (shouldKeepOrder ? completedInferenceResults.find(outputFrameId) != completedInferenceResults.end()
                                 : !completedInferenceResults.empty());
     });
-std::cout << "Lambda called " << lambdaCalls << " times\n";
-
-    time_now = std::chrono::high_resolution_clock::now();
-    auto a1_time = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
-    std::cout << "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx A1: "<< a1_time.count() << std::endl; 
-std::cout << "Thread AFTER" << std::this_thread::get_id() << " waiting..." << std::endl;
-
+    
     if (callbackException) {
         std::rethrow_exception(callbackException);
-    }
-
-    */
+    }   
 }
 
 int64_t AsyncPipeline::submitData(const InputData& inputData, const std::shared_ptr<MetaData>& metaData) {
