@@ -1717,7 +1717,7 @@ public:
     // "../plugin_skeletonizer_3D/test_cv_mat.ply");
 
     // Clean up the color image if it was created for decompression
-    if (color_format != K4A_IMAGE_FORMAT_COLOR_BGRA32) {
+    if (color_image_for_transform != NULL) {
       k4a_image_release(color_image_for_transform);
     }
 
@@ -2127,7 +2127,7 @@ public:
    * @author Nicola
    * @return result status ad defined in return_type
    */
-  return_type point_cloud_filter(bool debug = false, bool filter_enabled = true) {
+  return_type point_cloud_filter(bool debug = false, bool filter_enabled = false) {
 
     if(_video_source == KINECT_AZURE_CAMERA || _video_source == KINECT_AZURE_DUMMY){
       
@@ -2189,7 +2189,7 @@ public:
             write_ply_from_cv_mat(_point_cloud, ply_filename.c_str());
           }
         }
-      } else{
+      } else {
         // Handle case when body index map is null OR when filtering is disabled
         /*if(_body_index_map == nullptr) {
           cout << "\033[1;34mBody index map is null. Creating unfiltered point cloud.\033[0m" << endl;
@@ -2975,14 +2975,42 @@ public:
         return rt;
       }
     }
-
     // Update frame timestamp after acquiring frame
     out["ts"] = std::chrono::duration_cast<std::chrono::nanoseconds>(_frame_time.time_since_epoch()).count();
     
     auto time_now = std::chrono::high_resolution_clock::now();
     auto duration_acquire_frame = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
+    
 
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_skeleton_call = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+    
+    if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_skeleton_rgb = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+    
+    if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_hessian = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+    
+    if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
+      return return_type::error;
+    }
+    
+    time_now = std::chrono::high_resolution_clock::now();
+    auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
+    time_prev = time_now;
+    
     #ifdef KINECT_AZURE_LIBS
     if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
       // It should never hit timeout when K4A_WAIT_INFINITE is set.
@@ -2990,47 +3018,19 @@ public:
       return return_type::error;
     } 
     #endif
-
-    time_now = std::chrono::high_resolution_clock::now();
-    auto duration_skeleton_call = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
-    time_prev = time_now;
-
-    if (skeleton_from_rgb_compute(_params["debug"]["skeleton_from_rgb_compute"]) == return_type::error) {
-      return return_type::error;
-    }
-
-    time_now = std::chrono::high_resolution_clock::now();
-    auto duration_skeleton_rgb = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
-    time_prev = time_now;
-
-    if (hessian_compute(_params["debug"]["hessian_compute"]) == return_type::error) {
-      return return_type::error;
-    }
-
-    time_now = std::chrono::high_resolution_clock::now();
-    auto duration_hessian = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
-    time_prev = time_now;
-
-    if (cov3D_compute(_params["debug"]["cov3D_compute"]) == return_type::error) {
-      return return_type::error;
-    }
-
-    time_now = std::chrono::high_resolution_clock::now();
-    auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
-    time_prev = time_now;
-
     if (skeleton_3D_compute(_params["debug"]["skeleton_3D_compute"]) == return_type::error)
     {
       return return_type::error;
     }
-
+    
     time_now = std::chrono::high_resolution_clock::now();
     auto duration_skeleton_depth = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
-
-    if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", true)) == return_type::error) {
-      return return_type::error;
-    }
+    
+    // TODO: remove or chsck for memory leak (point cloud handles)
+    // if (point_cloud_filter(_params["debug"]["point_cloud_filter"],  _params.value("filter_point_cloud", false)) == return_type::error) {
+    //   return return_type::error;
+    // }
 
     time_now = std::chrono::high_resolution_clock::now();
     auto duration_point_cloud_filter = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
@@ -3051,7 +3051,6 @@ public:
     time_now = std::chrono::high_resolution_clock::now();
     auto duration_viewer = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
-
 
     // Prepare output 
     // the json definition is on the google doc: https://docs.google.com/document/d/1IRs9VA9gGh8CmGIK8cRInYrMCY8cF8FMGC5H8DoonJI
