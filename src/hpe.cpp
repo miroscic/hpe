@@ -2982,7 +2982,14 @@ public:
     auto duration_acquire_frame = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
     
-
+    #ifdef KINECT_AZURE_LIBS
+    if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
+      // It should never hit timeout when K4A_WAIT_INFINITE is set.
+      cout << "Error! Add capture to tracker process queue timeout!" << endl;
+      return return_type::error;
+    } 
+    #endif
+    
     time_now = std::chrono::high_resolution_clock::now();
     auto duration_skeleton_call = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
@@ -3011,13 +3018,6 @@ public:
     auto duration_cov = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - time_prev);
     time_prev = time_now;
     
-    #ifdef KINECT_AZURE_LIBS
-    if (!_kinect_tracker.enqueue_capture(_k4a_rgbd_capture)) {
-      // It should never hit timeout when K4A_WAIT_INFINITE is set.
-      cout << "Error! Add capture to tracker process queue timeout!" << endl;
-      return return_type::error;
-    } 
-    #endif
     if (skeleton_3D_compute(_params["debug"]["skeleton_3D_compute"]) == return_type::error)
     {
       return return_type::error;
