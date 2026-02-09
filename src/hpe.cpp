@@ -499,9 +499,9 @@ public:
     }
     
     // Set default target size if not set
-    if (_tsize == 0) {
-      _tsize = 416; // Common default for OpenPose models
-    }
+    //if (_tsize == 0) {
+    //  _tsize = 416; // Common default for OpenPose models
+    //}
     
     try {
       // setup inference model
@@ -806,8 +806,8 @@ public:
                 if (frame_obj.contains("frame") && frame_obj.contains("timestamp_ns")) {
                   int frame_number = frame_obj["frame"].get<int>();
                   auto ns = frame_obj["timestamp_ns"].get<long long>();;
-                    _frame_timestamps[frame_number] = chrono::system_clock::time_point(
-                      chrono::duration_cast<chrono::system_clock::duration>(chrono::nanoseconds(ns)));
+                    _frame_timestamps[frame_number] = chrono::steady_clock::time_point(
+                      chrono::duration_cast<chrono::steady_clock::duration>(chrono::nanoseconds(ns)));
                 }
               }
             }
@@ -1096,7 +1096,7 @@ public:
     }
 
     if (_video_source != KINECT_AZURE_DUMMY && _video_source != RGB_CAMERA_DUMMY && _video_source != RASPI_RGB_CAMERA_DUMMY)
-      _frame_time = chrono::system_clock::now();
+      _frame_time = chrono::steady_clock::now();
     else{
       _frame_time = _frame_timestamps[_global_frame_counter];
       cout << "Frame time: " << chrono::duration_cast<chrono::nanoseconds>(_frame_time.time_since_epoch()).count() << " ns" << endl;
@@ -1805,7 +1805,7 @@ public:
    */
   return_type acquire_frame( bool debug = false) {
 
-    _frame_time = chrono::system_clock::now();
+    _frame_time = chrono::steady_clock::now();
 
     if (_video_source == KINECT_AZURE_CAMERA){
       #ifdef KINECT_AZURE_LIBS
@@ -3189,7 +3189,7 @@ protected:
 
   string _agent_id; /**< the agent ID */
   string _model_file; /**< the model file path */
-  chrono::system_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
+  chrono::steady_clock::time_point _frame_time; /**< the timestamp in UNIX [ns] of the last acquired frame */
   int _camera_device = 0;
   data_t _fps = 25;
   
@@ -3247,8 +3247,8 @@ protected:
   int _rgb_height; /**< the height of the RGB frame */
   int _rgb_width; /**< the width of the RGB frame */
   VideoCapture _cap; /**< the OpenCV video capture object */
-  int _rgb_width_read = 1280;
-  int _rgb_height_read = 720;
+  int _rgb_width_read = 1024; //1280; //456; 
+  int _rgb_height_read = 768; //720; //256; 
 
   vector<cv::Point2i> _keypoints_list_openpose; /**< the 2D keypoints list for OpenPose */
   vector<cv::Point3f> _keypoints_cov_openpose; /**< the 2D covariance for OpenPose keypoints */
@@ -3272,7 +3272,7 @@ protected:
   vector<HumanPose> _poses_openpose; /**<  contains all the keypoints of all identified people */
 
   int _global_frame_counter = 0; /**< global frame counter for dummy */
-  map<int, chrono::system_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
+  map<int, chrono::steady_clock::time_point> _frame_timestamps; /**< frame timestamps for dummy */
 
 };
 

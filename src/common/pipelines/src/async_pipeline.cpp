@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+
 #include <openvino/openvino.hpp>
 
 #include <models/model_base.h>
@@ -32,6 +33,9 @@
 #include <utils/config_factory.h>
 #include <utils/performance_metrics.hpp>
 #include <utils/slog.hpp>
+
+#include <thread>
+
 
 struct InputData;
 struct MetaData;
@@ -64,16 +68,15 @@ AsyncPipeline::~AsyncPipeline() {
 
 void AsyncPipeline::waitForData(bool shouldKeepOrder) {
     std::unique_lock<std::mutex> lock(mtx);
-
     condVar.wait(lock, [&]() {
         return callbackException != nullptr || requestsPool->isIdleRequestAvailable() ||
                (shouldKeepOrder ? completedInferenceResults.find(outputFrameId) != completedInferenceResults.end()
                                 : !completedInferenceResults.empty());
     });
-
+    
     if (callbackException) {
         std::rethrow_exception(callbackException);
-    }
+    }   
 }
 
 int64_t AsyncPipeline::submitData(const InputData& inputData, const std::shared_ptr<MetaData>& metaData) {

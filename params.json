@@ -14,7 +14,7 @@
         "skeleton_3D_compute": false,
         "skeleton_from_rgb_compute": false,
         "acquire_frame": false,
-        "hessian_compute": true,
+        "hessian_compute": false,
         "cov3D_compute": false,
         "consistency_check": false,
         "point_cloud_filter": false,
